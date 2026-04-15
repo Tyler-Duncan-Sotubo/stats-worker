@@ -89,9 +89,6 @@ export class ArtistsService {
           });
         }
 
-        this.logger.log(
-          `Linked Spotify ID to existing artist "${existingByName.name}" → ${artist.spotifyId}`,
-        );
         linked++;
         continue;
       }

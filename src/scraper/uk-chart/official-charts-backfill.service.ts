@@ -48,7 +48,6 @@ export class OfficialChartsBackfillService {
     const chartName = options?.chartName ?? 'uk_official_singles';
 
     const dates = this.generateWeeklyDates(options);
-    this.logger.log(`Found ${dates.length} UK chart dates to process`);
 
     let totalEntries = 0;
     let totalDates = 0;
@@ -148,16 +147,8 @@ export class OfficialChartsBackfillService {
         percent: Math.round((totalDates / dates.length) * 100),
       });
 
-      this.logger.log(
-        `[${totalDates}/${dates.length}] Done ${date} — ${chart.data.length} entries`,
-      );
-
       await this.sleep(250);
     }
-
-    this.logger.log(
-      `UK backfill complete — ${totalDates} dates, ${totalEntries} chart entries`,
-    );
 
     return { dates: totalDates, entries: totalEntries };
   }
@@ -175,16 +166,12 @@ export class OfficialChartsBackfillService {
     const chartId = options?.chartId ?? this.chartId;
     const url = this.buildChartUrl(date, chartPath, chartId);
 
-    this.logger.log(`Testing UK chart fetch: ${url}`);
-
     const res = await fetch(url, {
       headers: {
         'User-Agent':
           'Mozilla/5.0 (compatible; tooXclusiveStatsBot/1.0; +https://tooxclusive.com)',
       },
     });
-
-    this.logger.log(`HTTP status: ${res.status}`);
 
     if (!res.ok) {
       this.logger.error(`Failed to fetch ${url} — status ${res.status}`);

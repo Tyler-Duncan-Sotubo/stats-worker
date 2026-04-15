@@ -26,14 +26,10 @@ export class ViewsRefreshService {
 
   async refreshAll(): Promise<void> {
     for (const view of VIEWS) {
-      const start = Date.now();
-
       try {
         await this.db.execute(
           sql.raw(`REFRESH MATERIALIZED VIEW CONCURRENTLY ${view}`),
         );
-
-        this.logger.log(`Refreshed ${view} in ${Date.now() - start}ms`);
       } catch (err) {
         this.logger.error(
           `Failed to refresh ${view}: ${(err as Error).message}`,

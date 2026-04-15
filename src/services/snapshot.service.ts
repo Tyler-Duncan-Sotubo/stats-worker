@@ -25,10 +25,6 @@ export class SnapshotService {
     let succeeded = 0;
     let failed = 0;
 
-    this.logger.log(
-      `[Artist snapshot] Starting for ${allArtists.length} artists`,
-    );
-
     for (let i = 0; i < allArtists.length; i += batchSize) {
       const batch = allArtists.slice(i, i + batchSize);
 
@@ -84,10 +80,6 @@ export class SnapshotService {
     let succeeded = 0;
     let failed = 0;
     let totalSongs = 0;
-
-    this.logger.log(
-      `[Song snapshot] Starting for ${allArtists.length} artists`,
-    );
 
     for (let i = 0; i < allArtists.length; i += batchSize) {
       const batch = allArtists.slice(i, i + batchSize);
@@ -172,10 +164,6 @@ export class SnapshotService {
       trackCount: payload.totals.trackCount,
       sourceUpdatedAt: this.normalizeKworbDate(payload.totals.lastUpdated),
     });
-
-    this.logger.log(
-      `[Artist snapshot] ${artist.name} — ${payload.totals.totalStreams.toLocaleString()} streams`,
-    );
   }
 
   private async snapshotArtistSongs(
@@ -199,10 +187,6 @@ export class SnapshotService {
           dailyStreams: song.dailyStreams,
         });
       }),
-    );
-
-    this.logger.log(
-      `[Song snapshot] ${artist.name} — ${payload.songs.length} songs`,
     );
 
     return payload.songs.length;

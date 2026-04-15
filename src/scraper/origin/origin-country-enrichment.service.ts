@@ -36,7 +36,6 @@ export class OriginCountryEnrichmentService {
       originCountry: country,
     });
 
-    this.logger.log(`Set originCountry=${country} for "${artistName}"`);
     return country;
   }
 

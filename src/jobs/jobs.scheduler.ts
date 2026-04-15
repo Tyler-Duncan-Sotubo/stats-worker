@@ -56,17 +56,17 @@ export class JobsScheduler {
     await this.songEnrichmentJob.runBatch();
   }
 
-  // Temporary catch-up: every 4 minutes
+  // Temporary catch-up: every 20 minutes until caught up, then monthly on the 1st at 2:30 AM
   // Monthly fallback: 2nd day of month at 4:00 AM
-  @Cron('*/4 * * * *', { timeZone: 'Europe/London' })
+  @Cron('*/20 * * * *', { timeZone: 'Europe/London' })
   @Cron('0 4 2 * *', { timeZone: 'Europe/London' })
   async runOriginCountryEnrichment(): Promise<void> {
     await this.originCountryEnrichmentJob.runBatch();
   }
 
-  // Temporary catch-up: every 2 minutes
+  // Temporary catch-up: every 30 minutes until caught up, then monthly on the 1st at 2:30 AM
   // Monthly fallback: 2nd day of month at 5:00 AM
-  @Cron('*/2 * * * *', { timeZone: 'Europe/London' })
+  @Cron('*/30 * * * *', { timeZone: 'Europe/London' })
   @Cron('0 5 2 * *', { timeZone: 'Europe/London' })
   async runCertificationsBatch(): Promise<void> {
     await this.certificationsJob.runBatch();
@@ -92,7 +92,7 @@ export class JobsScheduler {
   // INGESTION
   // ───────────────────────────────────────────────────────────────────────────
 
-  // Daily at 10:00 PM — ingest latest daily charts
+  // Daily at 2:00 PM — ingest latest daily charts
   @Cron('0 14 * * *', { timeZone: 'Europe/London' })
   async runDailyChartIngestion(): Promise<void> {
     await this.dailyChartIngestionJob.run();

@@ -199,7 +199,6 @@ export class SongScraperService {
       results.push(saved);
     }
 
-    this.logger.log(`[Scraper] Bulk enriched ${results.length} songs`);
     return results;
   }
 

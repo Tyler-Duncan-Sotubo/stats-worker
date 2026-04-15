@@ -35,7 +35,6 @@ export class SongEnrichmentJob {
         await this.songsRepository.findSongsNeedingEnrichment(10_000);
 
       if (!pending.length) {
-        this.logger.log('No songs need enrichment — skipping');
         await this.redis.del(REDIS_CURSOR_KEY);
         return;
       }

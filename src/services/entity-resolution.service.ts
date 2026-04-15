@@ -96,16 +96,11 @@ export class EntityResolutionService {
         this.songCache.set(`spotify::${s.spotifyTrackId}`, s);
       }
     }
-
-    this.logger.log(
-      `Cache warmed — ${artistRows.length} artists, ${songRows.length} songs`,
-    );
   }
 
   clearCache(): void {
     this.artistCache.clear();
     this.songCache.clear();
-    this.logger.log('Entity resolution cache cleared');
   }
 
   // ── Artist resolution ─────────────────────────────────────────────────

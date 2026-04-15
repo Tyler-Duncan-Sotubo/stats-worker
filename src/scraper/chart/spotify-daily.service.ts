@@ -433,10 +433,6 @@ export class SpotifyDailyService {
       .sort((a, b) => a.rank - b.rank)
       .filter((r) => r.rank <= 200);
 
-    this.logger.log(
-      `Fetched ${sorted.length} Apple Music tracks for ${country.toUpperCase()}`,
-    );
-
     return {
       country: country.toLowerCase(),
       label,

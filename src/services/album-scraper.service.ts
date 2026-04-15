@@ -39,10 +39,6 @@ export class AlbumScraperService {
       totalTracks: input.totalTracks ?? null,
     });
 
-    this.logger.log(
-      `[Scraper] Created album "${input.title}" (${input.spotifyAlbumId})`,
-    );
-
     return created;
   }
 
@@ -66,10 +62,6 @@ export class AlbumScraperService {
       imageUrl: input.imageUrl ?? null,
       totalTracks: input.totalTracks ?? null,
     });
-
-    this.logger.log(
-      `[Scraper] Upserted album "${input.title}" (${input.spotifyAlbumId})`,
-    );
 
     return saved;
   }

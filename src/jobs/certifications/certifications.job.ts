@@ -23,7 +23,6 @@ export class CertificationsJob {
 
     const allArtists = await this.artistsRepository.findAllBasic();
     if (!allArtists.length) {
-      this.logger.log('No artists found — skipping');
       return;
     }
 
@@ -39,10 +38,6 @@ export class CertificationsJob {
 
     const batch = allArtists.slice(cursor, cursor + BATCH_SIZE);
     const nextCursor = cursor + batch.length;
-
-    this.logger.log(
-      `Processing artists ${cursor + 1}–${nextCursor} of ${allArtists.length}`,
-    );
 
     let synced = 0;
     let failed = 0;

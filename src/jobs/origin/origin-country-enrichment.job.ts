@@ -33,7 +33,6 @@ export class OriginCountryEnrichmentJob {
       const allArtists =
         await this.artistsRepository.findMissingOriginCountryBasic();
       if (!allArtists.length) {
-        this.logger.log('No artists found — skipping');
         return;
       }
 
