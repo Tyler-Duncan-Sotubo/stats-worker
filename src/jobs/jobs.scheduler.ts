@@ -82,8 +82,8 @@ export class JobsScheduler {
     await this.artistSnapshotJob.run();
   }
 
-  // Daily at 8:00 AM — song snapshots
-  @Cron('0 8 * * *', { timeZone: 'Europe/London' })
+  // Daily at 2:10 PM — song snapshots
+  @Cron('10 14 * * *', { timeZone: 'Europe/London' })
   async runSongSnapshots(): Promise<void> {
     await this.songSnapshotJob.run();
   }
