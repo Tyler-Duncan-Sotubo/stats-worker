@@ -4,6 +4,8 @@ import { DRIZZLE } from 'src/infrastructure/drizzle/drizzle.module';
 import type { DrizzleDB } from 'src/infrastructure/drizzle/drizzle.module';
 import {
   artistStatsSnapshots,
+  songFeatures,
+  songs,
   songStatsSnapshots,
 } from 'src/infrastructure/drizzle/schema';
 
@@ -63,6 +65,24 @@ export class SnapshotRepository {
     return row;
   }
 
+  async artistSnapshotExistsForDate(
+    artistId: string,
+    snapshotDate: string,
+  ): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: artistStatsSnapshots.id })
+      .from(artistStatsSnapshots)
+      .where(
+        and(
+          eq(artistStatsSnapshots.artistId, artistId),
+          eq(artistStatsSnapshots.snapshotDate, snapshotDate),
+        ),
+      )
+      .limit(1);
+
+    return !!row;
+  }
+
   async findArtistSnapshot(artistId: string, snapshotDate: string) {
     const [row] = await this.db
       .select()
@@ -79,6 +99,28 @@ export class SnapshotRepository {
   }
 
   // ── Song snapshots ────────────────────────────────────────────────────
+
+  async findBySpotifyTrackId(spotifyTrackId: string) {
+    if (!spotifyTrackId) return null;
+
+    const [song] = await this.db
+      .select()
+      .from(songs)
+      .where(eq(songs.spotifyTrackId, spotifyTrackId))
+      .limit(1);
+
+    return song ?? null;
+  }
+
+  async ensureFeatureLink(
+    songId: string,
+    featuredArtistId: string,
+  ): Promise<void> {
+    await this.db
+      .insert(songFeatures)
+      .values({ songId, featuredArtistId })
+      .onConflictDoNothing();
+  }
 
   async upsertSongSnapshot(data: {
     songId: string;

@@ -45,7 +45,9 @@ export type KworbSpotifyDailyRow = {
   rank: number;
   artist: string;
   title: string;
-  featuredArtists: string[];
+  featuredArtists: string[] | undefined;
+  spotifyTrackId?: string; // ← add
+  imageUrl?: string; // ← add
 };
 
 export type KworbSpotifyDailyPayload = {

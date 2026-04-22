@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
 // src/scraper/services/spotify-daily.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';

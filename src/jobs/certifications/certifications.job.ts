@@ -4,8 +4,8 @@ import Redis from 'ioredis';
 import { CertificationsService } from 'src/services/certifications.service';
 import { ArtistsRepository } from 'src/repository/artists.repository';
 
-const BATCH_SIZE = 10;
-const DELAY_BETWEEN_MS = 2000;
+const BATCH_SIZE = 50;
+const STAGGER_MS = 100;
 const REDIS_CURSOR_KEY = 'cron:riaa_sync:cursor';
 
 @Injectable()
@@ -19,12 +19,8 @@ export class CertificationsJob {
   ) {}
 
   async runBatch(): Promise<void> {
-    this.logger.log('RIAA batch sync starting');
-
     const allArtists = await this.artistsRepository.findAllBasic();
-    if (!allArtists.length) {
-      return;
-    }
+    if (!allArtists.length) return;
 
     const cursorStr = await this.redis.get(REDIS_CURSOR_KEY);
     let cursor = cursorStr ? parseInt(cursorStr, 10) : 0;
@@ -39,30 +35,31 @@ export class CertificationsJob {
     const batch = allArtists.slice(cursor, cursor + BATCH_SIZE);
     const nextCursor = cursor + batch.length;
 
-    let synced = 0;
-    let failed = 0;
-
-    for (const artist of batch) {
-      try {
+    const results = await Promise.allSettled(
+      batch.map(async (artist, i) => {
+        await new Promise((r) => setTimeout(r, i * STAGGER_MS));
         await this.certificationsService.syncRiaaForArtist(
           artist.id,
           artist.name,
         );
-        synced++;
-      } catch (err) {
-        failed++;
+      }),
+    );
+
+    const synced = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.filter((r) => r.status === 'rejected').length;
+
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
         this.logger.error(
-          `Failed: "${artist.name}" (${artist.id}) — ${(err as Error).message}`,
+          `Failed: "${batch[i].name}" (${batch[i].id}) — ${(r.reason as Error).message}`,
         );
       }
-
-      await new Promise((resolve) => setTimeout(resolve, DELAY_BETWEEN_MS));
-    }
+    });
 
     await this.redis.set(REDIS_CURSOR_KEY, String(nextCursor));
 
     this.logger.log(
-      `Batch complete — ${synced} synced, ${failed} failed. Next run starts at artist ${nextCursor + 1}`,
+      `Batch complete — ${synced} synced, ${failed} failed. Next starts at ${nextCursor + 1}/${allArtists.length}`,
     );
   }
 
@@ -81,7 +78,7 @@ export class CertificationsJob {
     percentComplete: number;
     nextBatch: string;
   }> {
-    const allArtists = await this.artistsRepository.findAllWithSpotifyId();
+    const allArtists = await this.artistsRepository.findAllBasic();
     const cursorStr = await this.redis.get(REDIS_CURSOR_KEY);
     const cursor = cursorStr ? parseInt(cursorStr, 10) : 0;
 

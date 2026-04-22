@@ -23,8 +23,6 @@ export class OfficialChartsBackfillService {
   private readonly logger = new Logger(OfficialChartsBackfillService.name);
 
   private readonly baseUrl = 'https://www.officialcharts.com';
-  // private readonly chartPath = 'afrobeats-chart';
-  // private readonly chartId = 'afrobeat';
   private readonly chartPath = 'singles-chart';
   private readonly chartId = '7501';
 
@@ -48,6 +46,9 @@ export class OfficialChartsBackfillService {
     const chartName = options?.chartName ?? 'uk_official_singles';
 
     const dates = this.generateWeeklyDates(options);
+    this.logger.log(
+      `Official Charts backfill — ${dates.length} dates to process`,
+    );
 
     let totalEntries = 0;
     let totalDates = 0;
@@ -55,86 +56,79 @@ export class OfficialChartsBackfillService {
     for (const date of dates) {
       const chart = await this.fetchChart(date, chartPath, chartId);
 
-      if (!chart) {
-        this.logger.warn(`Skipping ${date} — failed to fetch/parse`);
-        continue;
-      }
-
-      if (!chart.data.length) {
-        this.logger.warn(
-          `Skipping ${date} — empty chart (selectors may have changed)`,
-        );
-        continue;
-      }
+      if (!chart || !chart.data.length) continue;
 
       for (const entry of chart.data) {
-        const { primary, featured } = this.parseAllArtists(entry.artist);
+        try {
+          const { primary, featured } = this.parseAllArtists(entry.artist);
 
-        const primaryArtist = await this.entityResolutionService.resolveArtist({
-          name: primary,
-          source: 'official_charts',
-          allowCreate: true,
-          markProvisionalIfCreated: true,
-        });
-
-        if (!primaryArtist) {
-          this.logger.warn(`Could not resolve artist: "${primary}" — skipping`);
-          continue;
-        }
-
-        const song = await this.entityResolutionService.resolveSong({
-          artistId: primaryArtist.id,
-          title: entry.song,
-          source: 'official_charts',
-          allowCreate: true,
-          markProvisionalIfCreated: true,
-        });
-
-        if (!song) {
-          this.logger.warn(
-            `Could not resolve song: "${entry.song}" — skipping`,
-          );
-          continue;
-        }
-
-        for (const featuredName of featured) {
-          const featuredArtist =
+          // Artists — never create from Official Charts
+          const primaryArtist =
             await this.entityResolutionService.resolveArtist({
-              name: featuredName,
+              name: primary,
               source: 'official_charts',
-              allowCreate: true,
-              markProvisionalIfCreated: true,
+              allowCreate: false,
+              markProvisionalIfCreated: false,
             });
 
-          if (!featuredArtist || featuredArtist.id === primaryArtist.id) {
-            continue;
+          if (!primaryArtist) continue;
+
+          // Songs — allow creation only if artist already exists
+          const song = await this.entityResolutionService.resolveSong({
+            artistId: primaryArtist.id,
+            artistSlug: primaryArtist.slug,
+            title: entry.song,
+            source: 'official_charts',
+            allowCreate: true,
+            markProvisionalIfCreated: true,
+          });
+
+          if (!song) continue;
+
+          // Featured artists — never create from Official Charts
+          for (const featuredName of featured) {
+            const featuredArtist =
+              await this.entityResolutionService.resolveArtist({
+                name: featuredName,
+                source: 'official_charts',
+                allowCreate: false,
+              });
+
+            if (!featuredArtist || featuredArtist.id === primaryArtist.id) {
+              continue;
+            }
+
+            await this.db
+              .insert(songFeatures)
+              .values({
+                songId: song.id,
+                featuredArtistId: featuredArtist.id,
+              })
+              .onConflictDoNothing();
           }
 
-          await this.db
-            .insert(songFeatures)
+          const rows = await this.db
+            .insert(chartEntries)
             .values({
+              artistId: primaryArtist.id,
               songId: song.id,
-              featuredArtistId: featuredArtist.id,
+              chartName,
+              chartTerritory: 'UK',
+              position: entry.this_week,
+              peakPosition: entry.peak_position ?? null,
+              weeksOnChart: entry.weeks_on_chart ?? null,
+              chartWeek: date,
+              source: 'official_charts',
             })
-            .onConflictDoNothing();
+            .onConflictDoNothing()
+            .returning({ id: chartEntries.id });
+
+          if (rows.length) totalEntries++;
+        } catch (err) {
+          this.logger.error(
+            `Failed ${date} #${entry.this_week} "${entry.song}": ${(err as Error).message}`,
+          );
         }
-
-        await this.db
-          .insert(chartEntries)
-          .values({
-            artistId: primaryArtist.id,
-            songId: song.id,
-            chartName,
-            chartTerritory: 'UK',
-            position: entry.this_week,
-            peakPosition: entry.peak_position ?? null,
-            weeksOnChart: entry.weeks_on_chart ?? null,
-            chartWeek: date,
-            source: 'uk_afrobeats_chart',
-          })
-          .onConflictDoNothing();
-
-        totalEntries++;
       }
 
       totalDates++;
@@ -147,10 +141,117 @@ export class OfficialChartsBackfillService {
         percent: Math.round((totalDates / dates.length) * 100),
       });
 
+      if (totalDates % 50 === 0) {
+        this.logger.log(
+          `Progress — ${totalDates}/${dates.length} dates, ${totalEntries} entries`,
+        );
+      }
+
       await this.sleep(250);
     }
 
+    this.logger.log(
+      `Backfill complete — ${totalDates} dates, ${totalEntries} entries`,
+    );
+
     return { dates: totalDates, entries: totalEntries };
+  }
+
+  async runLatest(options?: {
+    chartPath?: string;
+    chartName?: string;
+    chartId?: string;
+  }): Promise<{ entries: number }> {
+    const chartPath = options?.chartPath ?? this.chartPath;
+    const chartId = options?.chartId ?? this.chartId;
+    const chartName = options?.chartName ?? 'uk_official_singles';
+
+    // Get the most recent Friday
+    const latestDate = this.toIsoDate(this.alignToFriday(new Date()));
+
+    this.logger.log(
+      `Official Charts latest — fetching ${chartName} for ${latestDate}`,
+    );
+
+    const chart = await this.fetchChart(latestDate, chartPath, chartId);
+
+    if (!chart || !chart.data.length) {
+      this.logger.warn(`No data returned for ${chartName} on ${latestDate}`);
+      return { entries: 0 };
+    }
+
+    let totalEntries = 0;
+
+    for (const entry of chart.data) {
+      try {
+        const { primary, featured } = this.parseAllArtists(entry.artist);
+
+        const primaryArtist = await this.entityResolutionService.resolveArtist({
+          name: primary,
+          source: 'official_charts',
+          allowCreate: false,
+          markProvisionalIfCreated: false,
+        });
+
+        if (!primaryArtist) continue;
+
+        const song = await this.entityResolutionService.resolveSong({
+          artistId: primaryArtist.id,
+          artistSlug: primaryArtist.slug,
+          title: entry.song,
+          source: 'official_charts',
+          allowCreate: true,
+          markProvisionalIfCreated: true,
+        });
+
+        if (!song) continue;
+
+        for (const featuredName of featured) {
+          const featuredArtist =
+            await this.entityResolutionService.resolveArtist({
+              name: featuredName,
+              source: 'official_charts',
+              allowCreate: false,
+            });
+
+          if (!featuredArtist || featuredArtist.id === primaryArtist.id)
+            continue;
+
+          await this.db
+            .insert(songFeatures)
+            .values({ songId: song.id, featuredArtistId: featuredArtist.id })
+            .onConflictDoNothing();
+        }
+
+        const rows = await this.db
+          .insert(chartEntries)
+          .values({
+            artistId: primaryArtist.id,
+            songId: song.id,
+            chartName,
+            chartTerritory: 'UK',
+            position: entry.this_week,
+            peakPosition: entry.peak_position ?? null,
+            weeksOnChart: entry.weeks_on_chart ?? null,
+            chartWeek: latestDate,
+            source: 'official_charts',
+          })
+          .onConflictDoNothing()
+          .returning({ id: chartEntries.id });
+
+        if (rows.length) totalEntries++;
+      } catch (err) {
+        this.logger.error(
+          `Failed #${entry.this_week} "${entry.song}": ${(err as Error).message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Official Charts latest complete — ${totalEntries} entries for ${latestDate}`,
+    );
+
+    return { entries: totalEntries };
   }
 
   async testSingleDate(
@@ -174,7 +275,6 @@ export class OfficialChartsBackfillService {
     });
 
     if (!res.ok) {
-      this.logger.error(`Failed to fetch ${url} — status ${res.status}`);
       return { url, entries: 0, data: [], parsed: [] };
     }
 
@@ -237,9 +337,8 @@ export class OfficialChartsBackfillService {
             $el.find('.position, .chart-key, .chart-position').first().text(),
         );
 
-        if (!position || position < 1 || position > 100 || seen.has(position)) {
+        if (!position || position < 1 || position > 100 || seen.has(position))
           return;
-        }
 
         const rawTitle = this.cleanText(
           $el.find('h3, h4, .title, .chart-name, .track-title').first().text(),

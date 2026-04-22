@@ -10,6 +10,8 @@ import { RepositoryModule } from 'src/repository/repository.module';
 import { SpotifyMetadataService } from 'src/scraper/services/spotify-metadata.service';
 import { RiaaCertificationService } from 'src/scraper/services/riaa-certification.service';
 import { ScraperModule } from 'src/scraper/scraper.module';
+import { SongMetadataService } from './song-metadata.service';
+import { SpotifyAuthService } from './spotify-auth.service';
 
 @Module({
   imports: [RepositoryModule, ScraperModule],
@@ -23,6 +25,8 @@ import { ScraperModule } from 'src/scraper/scraper.module';
     ViewsRefreshService,
     SpotifyMetadataService,
     RiaaCertificationService,
+    SongMetadataService,
+    SpotifyAuthService,
   ],
   exports: [
     AlbumScraperService,
@@ -32,6 +36,8 @@ import { ScraperModule } from 'src/scraper/scraper.module';
     SnapshotService,
     SongScraperService,
     ViewsRefreshService,
+    SongMetadataService,
+    SpotifyAuthService,
   ],
 })
 export class ServicesModule {}

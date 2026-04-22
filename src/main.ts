@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { NestFactory } from '@nestjs/core';
 import {
   FastifyAdapter,
@@ -10,6 +9,7 @@ import { ValidationPipe } from '@nestjs/common';
 import fastifyCompress from '@fastify/compress';
 import fastifyCookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
+import { SpotifyOfficialChartsService } from './scraper/chart/spotify-official-charts.service';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -45,6 +45,9 @@ async function bootstrap() {
   });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+
+  // Restore Spotify session from env var on startup
+  app.get(SpotifyOfficialChartsService).ensureAuthStateFile();
 
   const port = process.env.PORT || 8001;
   await app.listen(port, '0.0.0.0');

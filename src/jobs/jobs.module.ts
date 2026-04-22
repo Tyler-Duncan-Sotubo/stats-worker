@@ -2,8 +2,6 @@ import { Module } from '@nestjs/common';
 import { JobsScheduler } from './jobs.scheduler';
 import { DiscoveryJob } from './discovery/discovery.job';
 import { CertificationsJob } from './certifications/certifications.job';
-import { ArtistSnapshotJob } from './snapshots/artist-snapshot.job';
-import { SongSnapshotJob } from './snapshots/song-snapshot.job';
 import { DailyChartIngestionJob } from './charts/daily-chart-ingestion.job';
 import { RefreshMaterializedViewsJob } from './views/refresh-materialized-views.job';
 import { OriginCountryEnrichmentJob } from './origin/origin-country-enrichment.job';
@@ -12,6 +10,9 @@ import { ArtistEnrichmentJob } from './catalog/artist-enrichment.job';
 import { RepositoryModule } from 'src/repository/repository.module';
 import { ServicesModule } from 'src/services/services.module';
 import { ScraperModule } from 'src/scraper/scraper.module';
+import { UnifiedSnapshotJob } from './snapshots/unified-snapshot.job';
+import { OfficialChartsIngestionJob } from './charts/official-charts-injecton.job';
+import { BillboardIngestionJob } from './charts/billboard-injection.job';
 
 @Module({
   imports: [RepositoryModule, ServicesModule, ScraperModule],
@@ -19,19 +20,18 @@ import { ScraperModule } from 'src/scraper/scraper.module';
     JobsScheduler,
     DiscoveryJob,
     CertificationsJob,
-    ArtistSnapshotJob,
-    SongSnapshotJob,
+    UnifiedSnapshotJob,
     DailyChartIngestionJob,
     RefreshMaterializedViewsJob,
     OriginCountryEnrichmentJob,
     SongEnrichmentJob,
     ArtistEnrichmentJob,
+    OfficialChartsIngestionJob,
+    BillboardIngestionJob,
   ],
   exports: [
     DiscoveryJob,
     CertificationsJob,
-    ArtistSnapshotJob,
-    SongSnapshotJob,
     DailyChartIngestionJob,
     RefreshMaterializedViewsJob,
   ],

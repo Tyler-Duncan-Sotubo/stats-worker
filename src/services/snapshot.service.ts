@@ -1,11 +1,46 @@
-// src/modules/snapshots/snapshot.service.ts
-
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/prefer-promise-reject-errors */
 import { Injectable, Logger } from '@nestjs/common';
-import { KworbTotalsService } from '../scraper/services/kworb-totals.service';
+import { InjectRedis } from '@nestjs-modules/ioredis';
+import Redis from 'ioredis';
 import axios from 'axios';
+import { KworbTotalsService } from '../scraper/services/kworb-totals.service';
 import { SnapshotRepository } from 'src/repository/snapshot.repository';
 import { ArtistsRepository } from 'src/repository/artists.repository';
 import { SongScraperService } from './song-scraper.service';
+
+const TIER_DAILY_MIN = 8_000_000;
+const TIER_HIGH_MIN = 4_800_000;
+const TIER_MID_MIN = 2_500_000;
+
+// Tune per tier — daily can be aggressive, low should be gentle
+const TIER_CONFIG: Record<TierFilter, { batchSize: number; sleepMs: number }> =
+  {
+    daily: { batchSize: 15, sleepMs: 1_000 },
+    high: { batchSize: 15, sleepMs: 1_000 },
+    mid: { batchSize: 10, sleepMs: 1_500 },
+    low: { batchSize: 5, sleepMs: 3_000 },
+    all: { batchSize: 5, sleepMs: 3_000 },
+  };
+
+const redisKey = (spotifyId: string, date: string) =>
+  `snapshot:done:${spotifyId}:${date}`;
+
+const TTL_SECONDS = 30 * 60 * 60;
+
+export type TierFilter = 'daily' | 'high' | 'mid' | 'low' | 'all';
+
+function tierOf(monthlyListeners: number): 'daily' | 'high' | 'mid' | 'low' {
+  if (monthlyListeners >= TIER_DAILY_MIN) return 'daily';
+  if (monthlyListeners >= TIER_HIGH_MIN) return 'high';
+  if (monthlyListeners >= TIER_MID_MIN) return 'mid';
+  return 'low';
+}
+
+function shouldRun(monthlyListeners: number, filter: TierFilter): boolean {
+  if (filter === 'all') return true;
+  return tierOf(monthlyListeners) === filter;
+}
 
 @Injectable()
 export class SnapshotService {
@@ -16,139 +51,104 @@ export class SnapshotService {
     private readonly snapshotRepository: SnapshotRepository,
     private readonly artistsRepository: ArtistsRepository,
     private readonly songScraperService: SongScraperService,
+    @InjectRedis() private readonly redis: Redis,
   ) {}
 
-  async snapshotAllArtists(): Promise<void> {
-    const today = new Date().toISOString().split('T')[0];
+  async runAll(filter: TierFilter = 'all', date?: string): Promise<void> {
+    const snapshotDate = date ?? new Date().toISOString().split('T')[0];
     const allArtists = await this.artistsRepository.findAllWithSpotifyId();
-    const batchSize = 5;
-    let succeeded = 0;
-    let failed = 0;
 
-    for (let i = 0; i < allArtists.length; i += batchSize) {
-      const batch = allArtists.slice(i, i + batchSize);
+    const artists = allArtists.filter((a) =>
+      shouldRun(a.monthlyListeners ?? 0, filter),
+    );
 
-      const results = await Promise.allSettled(
-        batch.map((artist) =>
-          this.snapshotArtistTotalsOnly(
-            artist as { id: string; spotifyId: string; name: string },
-            today,
-          ),
-        ),
-      );
-
-      for (let j = 0; j < results.length; j++) {
-        const result = results[j];
-
-        if (result.status === 'rejected') {
-          const artist = batch[j];
-          const reason =
-            result.reason instanceof Error
-              ? result.reason.message
-              : String(result.reason);
-
-          if (axios.isAxiosError(result.reason)) {
-            const status = result.reason.response?.status;
-            if (status === 404) {
-              await this.artistsRepository.markKworbNotFound(artist.id);
-            }
-          }
-
-          failed++;
-          this.logger.error(
-            `[Artist snapshot] Failed ${artist.spotifyId}: ${reason}`,
-          );
-        } else {
-          succeeded++;
-        }
-      }
-
-      if (i + batchSize < allArtists.length) {
-        await this.sleep(5000);
-      }
-    }
+    const { batchSize, sleepMs } = TIER_CONFIG[filter];
 
     this.logger.log(
-      `[Artist snapshot] Complete — ${succeeded} succeeded, ${failed} failed`,
+      `Snapshot starting — filter=${filter}, date=${snapshotDate}, candidates=${artists.length}/${allArtists.length}, batchSize=${batchSize}, sleepMs=${sleepMs}`,
     );
-  }
 
-  async snapshotAllSongs(): Promise<void> {
-    const today = new Date().toISOString().split('T')[0];
-    const allArtists = await this.artistsRepository.findAllWithSpotifyId();
-    const batchSize = 3;
     let succeeded = 0;
+    let skipped = 0;
     let failed = 0;
     let totalSongs = 0;
+    let batchNum = 0;
 
-    for (let i = 0; i < allArtists.length; i += batchSize) {
-      const batch = allArtists.slice(i, i + batchSize);
+    for (let i = 0; i < artists.length; i += batchSize) {
+      const batch = artists.slice(i, i + batchSize);
+      batchNum++;
 
       const results = await Promise.allSettled(
         batch.map((artist) =>
-          this.snapshotArtistSongs(
+          this.snapshotArtist(
             artist as { id: string; spotifyId: string; name: string },
-            today,
+            snapshotDate,
           ),
         ),
       );
 
       for (let j = 0; j < results.length; j++) {
         const result = results[j];
+        const artist = batch[j];
 
         if (result.status === 'rejected') {
-          const artist = batch[j];
-          const reason =
-            result.reason instanceof Error
-              ? result.reason.message
-              : String(result.reason);
-
-          if (axios.isAxiosError(result.reason)) {
-            const status = result.reason.response?.status;
-            if (status === 404) {
-              await this.artistsRepository.markKworbNotFound(artist.id);
+          if (result.reason === 'SKIP') {
+            skipped++;
+          } else {
+            if (axios.isAxiosError(result.reason)) {
+              const status = result.reason.response?.status;
+              if (status === 404) {
+                await this.artistsRepository.markKworbNotFound(artist.id);
+              }
             }
+            failed++;
+            this.logger.error(
+              `Snapshot failed ${artist.spotifyId}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+            );
           }
-
-          failed++;
-          this.logger.error(
-            `[Song snapshot] Failed ${artist.spotifyId}: ${reason}`,
-          );
         } else {
-          totalSongs += result.value ?? 0;
           succeeded++;
+          totalSongs += result.value ?? 0;
         }
       }
 
-      if (i + batchSize < allArtists.length) {
-        await this.sleep(6000);
+      if (batchNum % 100 === 0) {
+        this.logger.log(
+          `Snapshot progress — ${succeeded} done, ${skipped} skipped, ${failed} failed`,
+        );
+      }
+
+      if (i + batchSize < artists.length) {
+        await this.sleep(sleepMs);
       }
     }
 
     this.logger.log(
-      `[Song snapshot] Complete — ${succeeded} artists, ${totalSongs} songs, ${failed} failed`,
+      `Snapshot complete — ${succeeded} artists, ${totalSongs} songs, ${skipped} skipped, ${failed} failed`,
     );
   }
 
-  async snapshotArtist(spotifyId: string): Promise<void> {
-    const today = new Date().toISOString().split('T')[0];
-
-    const artist = await this.artistsRepository.findBySpotifyId(spotifyId);
-    if (!artist) {
-      this.logger.warn(`Artist not found for spotifyId=${spotifyId}`);
-      return;
-    }
-    if (!artist.spotifyId) return;
-
-    const a = artist as { id: string; spotifyId: string; name: string };
-    await this.snapshotArtistTotalsOnly(a, today);
-    await this.snapshotArtistSongs(a, today);
-  }
-
-  private async snapshotArtistTotalsOnly(
+  private async snapshotArtist(
     artist: { id: string; spotifyId: string; name: string },
     snapshotDate: string,
-  ): Promise<void> {
+  ): Promise<number> {
+    const key = redisKey(artist.spotifyId, snapshotDate);
+
+    // Check Redis first — cheapest check
+    const alreadyDone = await this.redis.get(key);
+    if (alreadyDone) return Promise.reject('SKIP');
+
+    // DB check second
+    const existsInDb =
+      await this.snapshotRepository.artistSnapshotExistsForDate(
+        artist.id,
+        snapshotDate,
+      );
+    if (existsInDb) {
+      await this.redis.set(key, '1', 'EX', TTL_SECONDS);
+      return Promise.reject('SKIP');
+    }
+
     const payload = await this.kworbTotals.fetchArtistTotals(artist.spotifyId);
 
     await this.snapshotRepository.upsertArtistSnapshot({
@@ -164,18 +164,52 @@ export class SnapshotService {
       trackCount: payload.totals.trackCount,
       sourceUpdatedAt: this.normalizeKworbDate(payload.totals.lastUpdated),
     });
+
+    // Process songs concurrently instead of sequentially
+    const songResults = await Promise.allSettled(
+      payload.songs.map((song) =>
+        this.snapshotSong(song, artist.id, snapshotDate),
+      ),
+    );
+
+    const songCount = songResults.filter(
+      (r) => r.status === 'fulfilled' && r.value,
+    ).length;
+
+    await this.redis.set(key, '1', 'EX', TTL_SECONDS);
+    return songCount;
   }
 
-  private async snapshotArtistSongs(
-    artist: { id: string; spotifyId: string; name: string },
+  private async snapshotSong(
+    song: {
+      title: string;
+      spotifyTrackId: string;
+      streams: number;
+      dailyStreams: number;
+      isFeature: boolean;
+    },
+    artistId: string,
     snapshotDate: string,
-  ): Promise<number> {
-    const payload = await this.kworbTotals.fetchArtistTotals(artist.spotifyId);
+  ): Promise<boolean> {
+    try {
+      if (song.isFeature) {
+        const existing = await this.snapshotRepository.findBySpotifyTrackId(
+          song.spotifyTrackId,
+        );
+        if (!existing) return false;
 
-    await Promise.all(
-      payload.songs.map(async (song) => {
+        await Promise.all([
+          this.snapshotRepository.upsertSongSnapshot({
+            songId: existing.id,
+            snapshotDate,
+            spotifyStreams: song.streams,
+            dailyStreams: song.dailyStreams,
+          }),
+          this.snapshotRepository.ensureFeatureLink(existing.id, artistId),
+        ]);
+      } else {
         const dbSong = await this.songScraperService.findOrCreate({
-          artistId: artist.id,
+          artistId,
           title: song.title,
           spotifyTrackId: song.spotifyTrackId,
         });
@@ -186,12 +220,12 @@ export class SnapshotService {
           spotifyStreams: song.streams,
           dailyStreams: song.dailyStreams,
         });
-      }),
-    );
-
-    return payload.songs.length;
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
-
   private normalizeKworbDate(value?: string | null): string | null {
     if (!value) return null;
     const normalized = value.replace(/\//g, '-');

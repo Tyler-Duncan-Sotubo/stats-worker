@@ -18,13 +18,12 @@ export class CertificationsService {
   async syncArtistCertifications(artistId: string): Promise<void> {
     const artist = await this.artistsRepository.findById(artistId);
     if (!artist) return;
-
     await this.syncRiaaForArtist(artist.id, artist.name);
   }
 
   async syncAllArtists(): Promise<void> {
     const artists = await this.artistsRepository.findAllWithSpotifyId();
-    this.logger.log(`Starting RIAA sync for ${artists.length} artists`);
+    this.logger.log(`RIAA sync starting — ${artists.length} artists`);
 
     let synced = 0;
     let failed = 0;
@@ -37,13 +36,17 @@ export class CertificationsService {
       } catch (err) {
         failed++;
         this.logger.error(
-          `Failed RIAA sync for "${artist.name}" (${artist.id}): ${(err as Error).message}`,
+          `RIAA sync failed "${artist.name}": ${(err as Error).message}`,
         );
+      }
+
+      if (synced % 50 === 0) {
+        this.logger.log(`RIAA sync progress — ${synced}/${artists.length}`);
       }
     }
 
     this.logger.log(
-      `RIAA sync complete — ${synced} succeeded, ${failed} failed out of ${artists.length} artists`,
+      `RIAA sync complete — ${synced} succeeded, ${failed} failed`,
     );
   }
 
@@ -92,17 +95,13 @@ export class CertificationsService {
 
   private parseUnits(raw: unknown): number | null {
     if (raw === null || raw === undefined) return null;
-
     if (typeof raw === 'number') return raw;
-
     if (typeof raw === 'string') {
       const match = raw.match(/^(\d+)x/i);
       if (match) return parseInt(match[1], 10);
-
       const direct = parseInt(raw, 10);
       return Number.isNaN(direct) ? null : direct;
     }
-
     return null;
   }
 }

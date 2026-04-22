@@ -1,5 +1,3 @@
-// src/modules/scraper/services/kworb-artist-discovery.service.ts
-
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
@@ -38,16 +36,16 @@ export class KworbArtistDiscoveryService {
       .replace(/[^a-z0-9 ]/g, '');
   }
 
-  // ── Parse a number like "135,361,606" or "170,891" ──────────────────────
   private parseNum(raw: string | undefined): number | null {
     if (!raw) return null;
     const n = parseInt(raw.replace(/[^0-9-]/g, ''), 10);
     return isNaN(n) ? null : n;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Daily chart — extracts artist name + Spotify ID from anchor hrefs
-  // ─────────────────────────────────────────────────────────────────────────
+  private sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
   async discoverFromDailyChart(country = 'ng'): Promise<DiscoveredArtist[]> {
     const url = `https://kworb.net/spotify/country/${country.toLowerCase()}_daily.html`;
 
@@ -74,24 +72,13 @@ export class KworbArtistDiscoveryService {
       seen.set(spotifyId, name);
     });
 
-    const artists: DiscoveredArtist[] = Array.from(seen.entries()).map(
-      ([spotifyId, name]) => ({ name, spotifyId, appearedOnCharts: 1 }),
-    );
-
-    this.logger.log(
-      `Discovered ${artists.length} artists from ${country.toUpperCase()} daily chart`,
-    );
-
-    return artists;
+    return Array.from(seen.entries()).map(([spotifyId, name]) => ({
+      name,
+      spotifyId,
+      appearedOnCharts: 1,
+    }));
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Listeners page — richer data: monthly listeners, daily change, peak
-  // URL: kworb.net/spotify/listeners.html
-  //      kworb.net/spotify/listeners2.html  etc.
-  //
-  // Table columns: Rank | Artist | Listeners | Daily +/- | Peak | PkListeners
-  // ─────────────────────────────────────────────────────────────────────────
   async discoverFromListenerPage(page = 1): Promise<DiscoveredArtist[]> {
     const suffix = page === 1 ? 'listeners.html' : `listeners${page}.html`;
     const url = `https://kworb.net/spotify/${suffix}`;
@@ -111,7 +98,6 @@ export class KworbArtistDiscoveryService {
     $('table tr').each((_, row) => {
       const cols = $(row).find('td');
 
-      // Page 1 has 6 cols, pages 2+ have 5
       if (cols.length < 5) return;
 
       const link = $(row).find('a[href*="artist/"]').first();
@@ -130,11 +116,7 @@ export class KworbArtistDiscoveryService {
 
       const monthlyListeners = this.parseNum(cols.eq(2).text());
       const dailyChange = this.parseNum(cols.eq(3).text());
-
-      // Page 1: [0 rank, 1 artist, 2 listeners, 3 daily, 4 peak, 5 pkListeners]
-      // Pages 2+: [0 rank, 1 artist, 2 listeners, 3 daily, 4 pkListeners]
       const hasPeakColumn = cols.length >= 6;
-
       const peakRank = hasPeakColumn ? this.parseNum(cols.eq(4).text()) : null;
       const peakListeners = hasPeakColumn
         ? this.parseNum(cols.eq(5).text())
@@ -151,80 +133,77 @@ export class KworbArtistDiscoveryService {
       });
     });
 
-    this.logger.log(
-      `Discovered ${artists.length} artists from listeners page ${page}`,
-    );
-
     return artists;
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Multi-country daily charts
-  // ─────────────────────────────────────────────────────────────────────────
   async discoverFromMultipleCharts(
     countries = ['ng', 'gh', 'ke', 'za', 'ug', 'us', 'gb', 'ca'],
   ): Promise<DiscoveryResult> {
-    const results = await Promise.allSettled(
-      countries.map((c) => this.discoverFromDailyChart(c)),
-    );
+    const allArtists: DiscoveredArtist[] = [];
+
+    for (const country of countries) {
+      try {
+        const artists = await this.discoverFromDailyChart(country);
+        allArtists.push(...artists);
+        await this.sleep(1500);
+      } catch (err) {
+        this.logger.warn(
+          `Failed chart scrape for ${country.toUpperCase()}: ${(err as Error).message}`,
+        );
+      }
+    }
 
     return this.mergeDiscoveryResults(
-      results
-        .filter(
-          (r): r is PromiseFulfilledResult<DiscoveredArtist[]> =>
-            r.status === 'fulfilled',
-        )
-        .flatMap((r) => r.value),
+      allArtists,
       `daily charts across ${countries.length} countries`,
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Multiple listener pages
-  // ─────────────────────────────────────────────────────────────────────────
   async discoverFromListenerPages(
-    pages = [1, 2, 3, 4],
+    pages = [1, 2, 3, 4, 5, 6, 7, 8],
   ): Promise<DiscoveryResult> {
-    const results = await Promise.allSettled(
-      pages.map((page) => this.discoverFromListenerPage(page)),
+    const allArtists: DiscoveredArtist[] = [];
+
+    for (const page of pages) {
+      try {
+        const artists = await this.discoverFromListenerPage(page);
+        allArtists.push(...artists);
+        await this.sleep(2000);
+      } catch (err) {
+        this.logger.warn(
+          `Failed listener page ${page}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Listener pages scraped — ${allArtists.length} raw artists from ${pages.length} pages`,
     );
 
     return this.mergeDiscoveryResults(
-      results
-        .filter(
-          (r): r is PromiseFulfilledResult<DiscoveredArtist[]> =>
-            r.status === 'fulfilled',
-        )
-        .flatMap((r) => r.value),
+      allArtists,
       `listener pages ${pages.join(', ')}`,
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Full discovery — charts + listeners combined
-  // This is the main entry point for the daily cron
-  // ─────────────────────────────────────────────────────────────────────────
   async discoverAll(): Promise<DiscoveryResult> {
-    const [charts, listeners] = await Promise.all([
-      this.discoverFromMultipleCharts(),
-      this.discoverFromListenerPages([1, 2, 3, 4]),
+    // Sequential — charts first, then listener pages, polite to Kworb
+    const charts = await this.discoverFromMultipleCharts();
+    await this.sleep(3000);
+    const listeners = await this.discoverFromListenerPages([
+      1, 2, 3, 4, 5, 6, 7, 8,
     ]);
 
-    // Merge both — listeners data enriches artists already found on charts
     return this.mergeDiscoveryResults(
       [...charts.artists, ...listeners.artists],
       'combined charts + listeners discovery',
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Shared merge + dedup logic
-  // ─────────────────────────────────────────────────────────────────────────
   private mergeDiscoveryResults(
     discovered: DiscoveredArtist[],
     sourceLabel: string,
   ): DiscoveryResult {
-    // Accumulate by Spotify ID — keep the richest listener data when merging
     const idMap = new Map<
       string,
       {
@@ -241,7 +220,6 @@ export class KworbArtistDiscoveryService {
       const existing = idMap.get(artist.spotifyId);
       if (existing) {
         existing.count += Math.max(artist.appearedOnCharts, 1);
-        // Keep the listener data if this entry has it and existing doesn't
         if (
           artist.monthlyListeners != null &&
           existing.monthlyListeners == null
@@ -263,7 +241,6 @@ export class KworbArtistDiscoveryService {
       }
     }
 
-    // Group by normalised name to catch duplicate Spotify profiles
     const byNormName = new Map<
       string,
       { spotifyId: string; name: string; count: number }[]
@@ -289,13 +266,6 @@ export class KworbArtistDiscoveryService {
 
       if (group.length > 1) {
         const losers = group.filter((g) => g.spotifyId !== winner.spotifyId);
-
-        this.logger.warn(
-          `Duplicate Spotify profiles for "${normName}": ` +
-            group.map((g) => `${g.spotifyId}(${g.count})`).join(', ') +
-            ` → keeping ${winner.spotifyId}`,
-        );
-
         duplicates.push({
           normalisedName: normName,
           keptSpotifyId: winner.spotifyId,
@@ -320,9 +290,9 @@ export class KworbArtistDiscoveryService {
     }
 
     this.logger.log(
-      `Discovery complete — ${artists.length} unique artists from ${idMap.size} raw IDs via ${sourceLabel}` +
+      `Discovery merged — ${artists.length} unique artists` +
         (duplicates.length
-          ? ` (${duplicates.length} duplicate groups collapsed)`
+          ? `, ${duplicates.length} duplicates collapsed`
           : ''),
     );
 

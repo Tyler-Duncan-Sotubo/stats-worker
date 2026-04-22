@@ -16,6 +16,9 @@ const VIEWS = [
   'song_trending_summary',
   'artist_country_summary',
   'artist_recent_chart_summary',
+  'artist_awards_summary',
+  'artist_records_summary',
+  'song_search_summary',
 ] as const;
 
 @Injectable()

@@ -138,10 +138,6 @@ export class KworbTotalsService {
         songs.push({ spotifyTrackId, title, streams, dailyStreams, isFeature });
       });
 
-    this.logger.log(
-      `Fetched ${songs.length} songs for ${artistName} (${spotifyId}) — total streams: ${totalStreams.toLocaleString()}`,
-    );
-
     return {
       artistName,
       spotifyId,

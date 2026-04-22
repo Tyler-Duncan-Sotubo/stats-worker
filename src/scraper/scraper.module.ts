@@ -16,6 +16,8 @@ import { SpotifyDailyService } from './chart/spotify-daily.service';
 import { OriginCountryEnrichmentService } from './origin/origin-country-enrichment.service';
 import { EntityResolutionService } from 'src/services/entity-resolution.service';
 import { ArtistsRepository } from 'src/repository/artists.repository';
+import { SpotifyAuthService } from 'src/services/spotify-auth.service';
+import { SpotifyOfficialChartsService } from './chart/spotify-official-charts.service';
 
 @Module({
   imports: [
@@ -41,6 +43,8 @@ import { ArtistsRepository } from 'src/repository/artists.repository';
     EntityResolutionService,
     OriginCountryEnrichmentService,
     ArtistsRepository,
+    SpotifyAuthService,
+    SpotifyOfficialChartsService,
   ],
   exports: [
     KworbArtistDiscoveryService,
@@ -50,6 +54,9 @@ import { ArtistsRepository } from 'src/repository/artists.repository';
     DailyChartIngestionService,
     OriginCountryEnrichmentService,
     ArtistsRepository,
+    OfficialChartsBackfillService,
+    BillboardBackfillService,
+    SpotifyOfficialChartsService,
   ],
 })
 export class ScraperModule {}

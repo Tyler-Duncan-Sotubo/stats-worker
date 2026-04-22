@@ -28,12 +28,10 @@ export class BillboardBackfillService {
     job?: Job,
     options?: { fromDate?: string; toDate?: string },
   ): Promise<{ dates: number; entries: number }> {
-    // ── Warm cache once — loads all artists + songs into memory ──────────
-    // Subsequent resolveArtist/resolveSong calls hit memory, not the DB
     await this.entityResolutionService.warmCache();
 
     const dates = await this.fetchDates(options);
-    this.logger.log(`Found ${dates.length} Billboard chart dates to process`);
+    this.logger.log(`Billboard backfill — ${dates.length} dates to process`);
 
     let totalEntries = 0;
     let totalDates = 0;
@@ -41,39 +39,31 @@ export class BillboardBackfillService {
     for (const date of dates) {
       const chart = await this.fetchChart(date);
 
-      if (!chart) {
-        this.logger.warn(`Skipping ${date} — failed to fetch`);
-        continue;
-      }
+      if (!chart) continue;
 
       for (const entry of chart.data) {
         try {
           const { primary, featured } = this.parseAllArtists(entry.artist);
 
-          // ── Resolve primary artist ──────────────────────────────────
+          // Artists — never create from Billboard
           const primaryArtist =
             await this.entityResolutionService.resolveArtist(
               {
                 name: primary,
                 source: 'billboard',
-                allowCreate: true,
-                markProvisionalIfCreated: true,
+                allowCreate: false,
+                markProvisionalIfCreated: false,
               },
               this.db,
             );
 
-          if (!primaryArtist) {
-            this.logger.warn(
-              `Could not resolve primary artist: "${primary}" — skipping`,
-            );
-            continue;
-          }
+          if (!primaryArtist) continue;
 
-          // ── Resolve song — pass artistSlug to avoid re-query ───────
+          // Songs — allow creation only if artist already exists
           const song = await this.entityResolutionService.resolveSong(
             {
               artistId: primaryArtist.id,
-              artistSlug: primaryArtist.slug, // already have it
+              artistSlug: primaryArtist.slug,
               title: entry.song,
               source: 'billboard',
               allowCreate: true,
@@ -82,21 +72,16 @@ export class BillboardBackfillService {
             this.db,
           );
 
-          if (!song) {
-            this.logger.warn(
-              `Could not resolve song: "${entry.song}" — skipping`,
-            );
-            continue;
-          }
+          if (!song) continue;
 
-          // ── Resolve featured artists ────────────────────────────────
+          // Featured artists — never create from Billboard
           for (const featuredName of featured) {
             const featuredArtist =
               await this.entityResolutionService.resolveArtist(
                 {
                   name: featuredName,
                   source: 'billboard',
-                  allowCreate: true,
+                  allowCreate: false,
                 },
                 this.db,
               );
@@ -110,7 +95,6 @@ export class BillboardBackfillService {
               .onConflictDoNothing();
           }
 
-          // ── Write chart entry ───────────────────────────────────────
           const rows = await this.db
             .insert(chartEntries)
             .values({
@@ -126,12 +110,10 @@ export class BillboardBackfillService {
             .onConflictDoNothing()
             .returning({ id: chartEntries.id });
 
-          if (rows.length) {
-            totalEntries++;
-          }
+          if (rows.length) totalEntries++;
         } catch (err) {
           this.logger.error(
-            `Failed ${date} #${entry.this_week} "${entry.song}" by "${entry.artist}": ${(err as Error).message}`,
+            `Failed ${date} #${entry.this_week} "${entry.song}": ${(err as Error).message}`,
           );
         }
       }
@@ -146,24 +128,126 @@ export class BillboardBackfillService {
         percent: Math.round((totalDates / dates.length) * 100),
       });
 
-      this.logger.log(
-        `[${totalDates}/${dates.length}] Done ${date} — ${chart.data.length} rows processed`,
-      );
+      if (totalDates % 50 === 0) {
+        this.logger.log(
+          `Progress — ${totalDates}/${dates.length} dates, ${totalEntries} entries`,
+        );
+      }
 
       await this.sleep(150);
     }
 
-    // ── Clear cache after run — free memory ──────────────────────────────
     this.entityResolutionService.clearCache();
 
     this.logger.log(
-      `Backfill complete — ${totalDates} dates, ${totalEntries} chart entries inserted`,
+      `Backfill complete — ${totalDates} dates, ${totalEntries} entries`,
     );
 
     return { dates: totalDates, entries: totalEntries };
   }
 
-  // ── Artist string parsing ─────────────────────────────────────────────
+  async runLatest(): Promise<{ entries: number }> {
+    const today = new Date().toISOString().split('T')[0];
+
+    // Fetch valid dates and get the most recent one
+    const allDates = await this.fetchDates({ toDate: today });
+    const latestDate = allDates[0]; // already sorted descending
+
+    if (!latestDate) {
+      this.logger.warn('No valid Billboard dates found');
+      return { entries: 0 };
+    }
+
+    this.logger.log(`Billboard latest — fetching Hot 100 for ${latestDate}`);
+
+    const chart = await this.fetchChart(latestDate);
+
+    if (!chart || !chart.data.length) {
+      this.logger.warn(`No data returned for ${latestDate}`);
+      return { entries: 0 };
+    }
+
+    let totalEntries = 0;
+
+    for (const entry of chart.data) {
+      try {
+        const { primary, featured } = this.parseAllArtists(entry.artist);
+
+        const primaryArtist = await this.entityResolutionService.resolveArtist(
+          {
+            name: primary,
+            source: 'billboard',
+            allowCreate: false,
+            markProvisionalIfCreated: false,
+          },
+          this.db,
+        );
+
+        if (!primaryArtist) continue;
+
+        const song = await this.entityResolutionService.resolveSong(
+          {
+            artistId: primaryArtist.id,
+            artistSlug: primaryArtist.slug,
+            title: entry.song,
+            source: 'billboard',
+            allowCreate: true,
+            markProvisionalIfCreated: true,
+          },
+          this.db,
+        );
+
+        if (!song) continue;
+
+        for (const featuredName of featured) {
+          const featuredArtist =
+            await this.entityResolutionService.resolveArtist(
+              {
+                name: featuredName,
+                source: 'billboard',
+                allowCreate: false,
+              },
+              this.db,
+            );
+
+          if (!featuredArtist || featuredArtist.id === primaryArtist.id)
+            continue;
+
+          await this.db
+            .insert(songFeatures)
+            .values({ songId: song.id, featuredArtistId: featuredArtist.id })
+            .onConflictDoNothing();
+        }
+
+        const rows = await this.db
+          .insert(chartEntries)
+          .values({
+            artistId: primaryArtist.id,
+            songId: song.id,
+            chartName: 'billboard_hot_100',
+            chartTerritory: 'US',
+            position: entry.this_week,
+            peakPosition: entry.peak_position ?? null,
+            weeksOnChart: entry.weeks_on_chart ?? null,
+            chartWeek: latestDate,
+          })
+          .onConflictDoNothing()
+          .returning({ id: chartEntries.id });
+
+        if (rows.length) totalEntries++;
+      } catch (err) {
+        this.logger.error(
+          `Failed #${entry.this_week} "${entry.song}": ${(err as Error).message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Billboard latest complete — ${totalEntries} entries for ${latestDate}`,
+    );
+
+    return { entries: totalEntries };
+  }
 
   private parseAllArtists(raw: string): {
     primary: string;
@@ -186,8 +270,6 @@ export class BillboardBackfillService {
     };
   }
 
-  // ── Data fetching ─────────────────────────────────────────────────────
-
   private async fetchDates(options?: {
     fromDate?: string;
     toDate?: string;
@@ -203,7 +285,7 @@ export class BillboardBackfillService {
         if (options?.toDate && date > options.toDate) return false;
         return true;
       })
-      .sort((a, b) => b.localeCompare(a)); // newest → oldest
+      .sort((a, b) => b.localeCompare(a));
   }
 
   private async fetchChart(date: string): Promise<BillboardChart | null> {

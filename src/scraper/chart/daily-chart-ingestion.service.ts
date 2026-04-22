@@ -1,4 +1,4 @@
-import { and, desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { DRIZZLE } from 'src/infrastructure/drizzle/drizzle.module';
 import type { DrizzleDB } from 'src/infrastructure/drizzle/drizzle.module';
@@ -6,12 +6,14 @@ import {
   chartEntries,
   chartEntrySnapshots,
   songFeatures,
+  songs,
 } from 'src/infrastructure/drizzle/schema';
 import { SpotifyDailyService } from './spotify-daily.service';
 import { KworbSpotifyDailyRow } from '../dto/kworb.dto';
 import { EntityResolutionService } from 'src/services/entity-resolution.service';
+import { SpotifyOfficialChartsService } from './spotify-official-charts.service';
 
-const SPOTIFY_DAILY_COUNTRIES = ['ng', 'za'] as const;
+const SPOTIFY_DAILY_COUNTRIES = ['ng', 'za', 'gb', 'global'] as const;
 const APPLE_DAILY_COUNTRIES = ['ng', 'gh', 'ke', 'za', 'ug'] as const;
 const EAST_AFRICA_COUNTRIES = ['ke', 'tz', 'ug', 'rw', 'et'] as const;
 
@@ -27,6 +29,7 @@ export class DailyChartIngestionService {
     @Inject(DRIZZLE) private readonly db: DrizzleDB,
     private readonly spotifyDailyService: SpotifyDailyService,
     private readonly entityResolutionService: EntityResolutionService,
+    private readonly spotifyOfficialChartsService: SpotifyOfficialChartsService, // ← add
   ) {}
 
   async runDailyIngestion(): Promise<void> {
@@ -72,13 +75,22 @@ export class DailyChartIngestionService {
     date: string,
   ): Promise<void> {
     try {
-      const payload = await this.spotifyDailyService.fetchDailyTracks(
+      const payload = await this.spotifyOfficialChartsService.fetchDailyTracks(
         country,
-        100,
+        200,
       );
 
+      const rows = payload.rows.map((row) => ({
+        rank: row.rank,
+        artist: row.artist, // "Kidd Carder, Mavo" — splitCompoundArtist handles this
+        title: row.title,
+        spotifyTrackId: row.spotifyUrl?.split('/track/')[1] ?? undefined,
+        imageUrl: row.imageUrl,
+        // no featuredArtists here — splitCompoundArtist extracts them from artist string
+      }));
+
       await this.persistRows(
-        payload.rows,
+        rows,
         `spotify_daily_${country}`,
         country.toUpperCase(),
         date,
@@ -86,7 +98,7 @@ export class DailyChartIngestionService {
       );
 
       this.logger.log(
-        `[Spotify/${country.toUpperCase()}] Ingested ${payload.rows.length} entries`,
+        `[Spotify/${country.toUpperCase()}] Ingested ${rows.length} entries`,
       );
     } catch (err) {
       this.logger.error(
@@ -174,20 +186,23 @@ export class DailyChartIngestionService {
       );
     }
   }
-
   private async persistRows(
-    rows: KworbSpotifyDailyRow[],
+    rows: any[],
     chartName: string,
     chartTerritory: string,
     chartWeek: string,
     source: 'kworb' | 'apple_music' | 'manual',
   ): Promise<void> {
     for (const row of rows) {
+      const { primaryName, collaborators } = this.splitCompoundArtist(
+        row.artist,
+      );
+
       const primaryArtist = await this.entityResolutionService.resolveArtist({
-        name: row.artist,
+        name: primaryName,
         source,
         allowCreate: true,
-        markProvisionalIfCreated: source !== 'kworb',
+        markProvisionalIfCreated: true,
       });
 
       if (!primaryArtist) continue;
@@ -197,18 +212,28 @@ export class DailyChartIngestionService {
         title: row.title,
         source,
         allowCreate: true,
-        markProvisionalIfCreated: source !== 'kworb',
+        markProvisionalIfCreated: true,
+        spotifyTrackId: row.spotifyTrackId,
       });
 
       if (!song) continue;
 
-      for (const featuredName of row.featuredArtists ?? []) {
+      if (row.imageUrl && !song.imageUrl) {
+        await this.db
+          .update(songs)
+          .set({ imageUrl: row.imageUrl })
+          .where(eq(songs.id, song.id));
+      }
+
+      const allFeatured = [...collaborators, ...(row.featuredArtists ?? [])];
+
+      for (const featuredName of allFeatured) {
         const featuredArtist = await this.entityResolutionService.resolveArtist(
           {
             name: featuredName,
             source,
-            allowCreate: true,
-            markProvisionalIfCreated: true,
+            allowCreate: false,
+            markProvisionalIfCreated: false,
           },
         );
 
@@ -216,10 +241,7 @@ export class DailyChartIngestionService {
 
         await this.db
           .insert(songFeatures)
-          .values({
-            songId: song.id,
-            featuredArtistId: featuredArtist.id,
-          })
+          .values({ songId: song.id, featuredArtistId: featuredArtist.id })
           .onConflictDoNothing();
       }
 
@@ -229,6 +251,19 @@ export class DailyChartIngestionService {
         chartTerritory,
         chartWeek,
       });
+
+      // Remove any existing entry at this position for this chart/territory/week
+      // (handles the case where a different song held this rank on a previous run)
+      await this.db
+        .delete(chartEntries)
+        .where(
+          and(
+            eq(chartEntries.chartName, chartName),
+            eq(chartEntries.chartTerritory, chartTerritory),
+            eq(chartEntries.chartWeek, chartWeek),
+            eq(chartEntries.position, row.rank),
+          ),
+        );
 
       const inserted = await this.db
         .insert(chartEntries)
@@ -243,14 +278,26 @@ export class DailyChartIngestionService {
           chartWeek,
           source,
         })
-        .onConflictDoNothing()
+        .onConflictDoUpdate({
+          target: [
+            chartEntries.songId,
+            chartEntries.chartName,
+            chartEntries.chartTerritory,
+            chartEntries.chartWeek,
+          ],
+          set: {
+            position: row.rank,
+            artistId: primaryArtist.id,
+            source,
+            ingestedAt: new Date(),
+          },
+        })
         .returning({ id: chartEntries.id });
 
-      if (!inserted.length) {
-        continue;
-      }
+      if (!inserted.length) continue;
 
       const entryId = inserted[0].id;
+
       const snapshot = this.buildSnapshot(
         row.rank,
         previousEntry?.position ?? null,
@@ -273,6 +320,61 @@ export class DailyChartIngestionService {
           },
         });
     }
+
+    // After all rows are persisted, recompute peak and weeks for this chart
+    await this.updatePeakAndWeeks(chartName, chartTerritory);
+  }
+
+  private async updatePeakAndWeeks(
+    chartName: string,
+    chartTerritory: string,
+  ): Promise<void> {
+    await this.db.execute(sql`
+    UPDATE chart_entries ce
+    SET
+      weeks_on_chart = history.weeks,
+      peak_position  = history.peak
+    FROM (
+      SELECT
+        id,
+        CEIL(
+          COUNT(*) OVER (
+            PARTITION BY song_id, chart_name, chart_territory
+            ORDER BY chart_week ASC
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+          ) / 7.0
+        ) AS weeks,
+        MIN(position) OVER (
+          PARTITION BY song_id, chart_name, chart_territory
+          ORDER BY chart_week ASC
+          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS peak
+      FROM chart_entries
+      WHERE chart_name    = ${chartName}
+        AND chart_territory = ${chartTerritory}
+    ) history
+    WHERE ce.id = history.id
+  `);
+
+    this.logger.log(`[${chartName}/${chartTerritory}] Peak and weeks updated`);
+  }
+  private splitCompoundArtist(artistStr: string): {
+    primaryName: string;
+    collaborators: string[];
+  } {
+    const parts = artistStr
+      .split(/\s*(?:&|,|\bx\b|×|\+)\s*/i)
+      .map((p) => p.trim())
+      .filter(Boolean);
+
+    if (parts.length <= 1) {
+      return { primaryName: artistStr.trim(), collaborators: [] };
+    }
+
+    return {
+      primaryName: parts[0],
+      collaborators: parts.slice(1),
+    };
   }
 
   private async findPreviousChartEntry(params: {

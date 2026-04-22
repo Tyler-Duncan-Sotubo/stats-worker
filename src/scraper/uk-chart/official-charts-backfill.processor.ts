@@ -10,8 +10,11 @@ import { OfficialChartsBackfillService } from './official-charts-backfill.servic
   limiter: {
     max: 1,
     duration: 1000,
+    lockDuration: 300000, // 5 minutes
+    maxStalledCount: 0, // never mark as stalled
+    stalledInterval: 300000, // check every 5 minutes
   },
-} as WorkerOptions)
+} as unknown as WorkerOptions)
 @Injectable()
 export class OfficialChartsBackfillProcessor extends WorkerHost {
   private readonly logger = new Logger(OfficialChartsBackfillProcessor.name);

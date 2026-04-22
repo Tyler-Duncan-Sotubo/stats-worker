@@ -20,7 +20,6 @@ export class ArtistsService {
   async seedFromDiscovery(discovered: DiscoveredArtist[]): Promise<void> {
     if (!discovered.length) return;
 
-    // Load all existing artists once for name matching
     const existingArtists = await this.artistsRepository.findAllBasic();
 
     const bySpotifyId = new Map(
@@ -39,97 +38,100 @@ export class ArtistsService {
     let skipped = 0;
 
     for (const artist of discovered) {
-      const normName = this.normaliseName(artist.name);
-      const slug = this.buildSlug(artist.name);
+      try {
+        const normName = this.normaliseName(artist.name);
+        const slug = this.buildSlug(artist.name);
 
-      // ── Case 1: already have this Spotify ID → just write listener snapshot
-      const existingBySpotifyId = bySpotifyId.get(artist.spotifyId);
-      if (existingBySpotifyId) {
-        if (artist.monthlyListeners != null) {
-          await this.artistsRepository.upsertMonthlyListenerSnapshot({
-            artistId: existingBySpotifyId.id,
-            spotifyId: artist.spotifyId,
-            snapshotDate: today,
-            monthlyListeners: artist.monthlyListeners,
-            dailyChange: artist.dailyChange ?? null,
-            peakRank: artist.peakRank ?? null,
-            peakListeners: artist.peakListeners ?? null,
-          });
-          enriched++;
-        } else {
-          skipped++;
+        // ── Case 1: already have this Spotify ID → write listener snapshot
+        const existingBySpotifyId = bySpotifyId.get(artist.spotifyId);
+        if (existingBySpotifyId) {
+          if (artist.monthlyListeners != null) {
+            await this.artistsRepository.upsertMonthlyListenerSnapshot({
+              artistId: existingBySpotifyId.id,
+              spotifyId: artist.spotifyId,
+              snapshotDate: today,
+              monthlyListeners: artist.monthlyListeners,
+              dailyChange: artist.dailyChange ?? null,
+              peakRank: artist.peakRank ?? null,
+              peakListeners: artist.peakListeners ?? null,
+            });
+            enriched++;
+          } else {
+            skipped++;
+          }
+          continue;
         }
-        continue;
-      }
 
-      // ── Case 2: artist exists by name but no Spotify ID yet
-      // (seeded by Billboard) → link the Spotify ID + write snapshot
-      const existingByName = byNormName.get(normName) || bySlug.get(slug);
-      if (existingByName && !existingByName.spotifyId) {
-        await this.artistsRepository.updateSpotifyId(
-          existingByName.id,
-          artist.spotifyId,
+        // ── Case 2: exists by name but no Spotify ID → link + write snapshot
+        const existingByName = byNormName.get(normName) || bySlug.get(slug);
+        if (existingByName && !existingByName.spotifyId) {
+          await this.artistsRepository.updateSpotifyId(
+            existingByName.id,
+            artist.spotifyId,
+          );
+
+          bySpotifyId.set(artist.spotifyId, {
+            ...existingByName,
+            spotifyId: artist.spotifyId,
+          });
+
+          if (artist.monthlyListeners != null) {
+            await this.artistsRepository.upsertMonthlyListenerSnapshot({
+              artistId: existingByName.id,
+              spotifyId: artist.spotifyId,
+              snapshotDate: today,
+              monthlyListeners: artist.monthlyListeners,
+              dailyChange: artist.dailyChange ?? null,
+              peakRank: artist.peakRank ?? null,
+              peakListeners: artist.peakListeners ?? null,
+            });
+          }
+
+          linked++;
+          continue;
+        }
+
+        // ── Case 3: genuinely new artist → create as canonical
+        if (!existingByName) {
+          const resolved = await this.entityResolution.resolveArtist({
+            name: artist.name,
+            spotifyId: artist.spotifyId,
+            source: 'kworb',
+            allowCreate: true,
+            markProvisionalIfCreated: false,
+            externalIds: [
+              { source: 'spotify', externalId: artist.spotifyId },
+              {
+                source: 'kworb',
+                externalId: artist.spotifyId,
+                externalUrl: `https://kworb.net/spotify/artist/${artist.spotifyId}.html`,
+              },
+            ],
+          });
+
+          if (resolved && artist.monthlyListeners != null) {
+            await this.artistsRepository.upsertMonthlyListenerSnapshot({
+              artistId: resolved.id,
+              spotifyId: artist.spotifyId,
+              snapshotDate: today,
+              monthlyListeners: artist.monthlyListeners,
+              dailyChange: artist.dailyChange ?? null,
+              peakRank: artist.peakRank ?? null,
+              peakListeners: artist.peakListeners ?? null,
+            });
+          }
+
+          created++;
+        }
+      } catch (err) {
+        this.logger.error(
+          `Failed seeding artist "${artist.name}": ${(err as Error).message}`,
         );
-
-        // Update local maps so subsequent iterations don't re-link
-        bySpotifyId.set(artist.spotifyId, {
-          ...existingByName,
-          spotifyId: artist.spotifyId,
-        });
-
-        if (artist.monthlyListeners != null) {
-          await this.artistsRepository.upsertMonthlyListenerSnapshot({
-            artistId: existingByName.id,
-            spotifyId: artist.spotifyId,
-            snapshotDate: today,
-            monthlyListeners: artist.monthlyListeners,
-            dailyChange: artist.dailyChange ?? null,
-            peakRank: artist.peakRank ?? null,
-            peakListeners: artist.peakListeners ?? null,
-          });
-        }
-
-        linked++;
-        continue;
-      }
-
-      // ── Case 3: genuinely new artist → create via entity resolution
-      if (!existingByName) {
-        const resolved = await this.entityResolution.resolveArtist({
-          name: artist.name,
-          spotifyId: artist.spotifyId,
-          source: 'kworb',
-          allowCreate: true,
-          markProvisionalIfCreated: false,
-          externalIds: [
-            { source: 'spotify', externalId: artist.spotifyId },
-            {
-              source: 'kworb',
-              externalId: artist.spotifyId,
-              externalUrl: `https://kworb.net/spotify/artist/${artist.spotifyId}.html`,
-            },
-          ],
-        });
-
-        if (resolved && artist.monthlyListeners != null) {
-          await this.artistsRepository.upsertMonthlyListenerSnapshot({
-            artistId: resolved.id,
-            spotifyId: artist.spotifyId,
-            snapshotDate: today,
-            monthlyListeners: artist.monthlyListeners,
-            dailyChange: artist.dailyChange ?? null,
-            peakRank: artist.peakRank ?? null,
-            peakListeners: artist.peakListeners ?? null,
-          });
-        }
-
-        created++;
       }
     }
 
     this.logger.log(
-      `Discovery seed complete — ${linked} linked, ${created} created, ` +
-        `${enriched} listener snapshots updated, ${skipped} skipped`,
+      `Seed complete — ${created} created, ${linked} linked, ${enriched} snapshots updated, ${skipped} skipped`,
     );
   }
 

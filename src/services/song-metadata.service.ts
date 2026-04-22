@@ -1,20 +1,25 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosResponse } from 'axios';
-import { SpotifyAuthService } from 'src/services/spotify-auth.service';
+import { SpotifyAuthService } from './spotify-auth.service';
 
-export interface SpotifyArtistMetadata {
-  spotifyId: string;
-  name: string;
-  imageUrl: string | null;
-  followers: number;
-  popularity: number;
-  genres: string[];
+export interface SpotifyTrackMetadata {
+  spotifyTrackId: string;
+  title: string;
+  spotifyAlbumId: string;
+  albumName: string;
+  albumType: string;
+  albumImageUrl: string | null;
+  releaseDate: string;
+  totalTracks: number;
+  durationMs: number;
+  explicit: boolean;
 }
 
 @Injectable()
-export class SpotifyMetadataService {
-  private readonly logger = new Logger(SpotifyMetadataService.name);
+export class SongMetadataService {
+  private readonly logger = new Logger(SongMetadataService.name);
   private accessToken: string | null = null;
   private tokenExpiresAt = 0;
 
@@ -35,7 +40,7 @@ export class SpotifyMetadataService {
           timeout: 10_000,
         },
       );
-      return response.data as unknown as T;
+      return response.data as T;
     } catch (err) {
       if (
         retry &&
@@ -52,28 +57,28 @@ export class SpotifyMetadataService {
     }
   }
 
-  // ── Single artist ─────────────────────────────────────────────────────
+  // ── Single track ──────────────────────────────────────────────────────
 
-  async fetchArtistMetadata(spotifyId: string): Promise<SpotifyArtistMetadata> {
-    const data = await this.get<any>(`/artists/${spotifyId}`);
-    return this.mapArtist(data);
+  async fetchTrack(spotifyTrackId: string): Promise<SpotifyTrackMetadata> {
+    const data = await this.get<any>(`/tracks/${spotifyTrackId}`);
+    return this.mapTrack(data);
   }
 
-  // ── Batch artists — up to 50 per Spotify request ──────────────────────
+  // ── Batch tracks — up to 50 per Spotify request ───────────────────────
 
-  async fetchMultipleArtists(
-    spotifyIds: string[],
-  ): Promise<SpotifyArtistMetadata[]> {
-    const results: SpotifyArtistMetadata[] = [];
-    const chunks = this.chunk(spotifyIds, 50);
+  async fetchTracks(
+    spotifyTrackIds: string[],
+  ): Promise<SpotifyTrackMetadata[]> {
+    const results: SpotifyTrackMetadata[] = [];
+    const chunks = this.chunk(spotifyTrackIds, 50);
 
     for (const chunk of chunks) {
       try {
-        const data = await this.get<any>(`/artists?ids=${chunk.join(',')}`);
+        const data = await this.get<any>(`/tracks?ids=${chunk.join(',')}`);
 
-        for (const artist of data.artists ?? []) {
-          if (!artist) continue;
-          results.push(this.mapArtist(artist));
+        for (const track of data.tracks ?? []) {
+          if (!track) continue;
+          results.push(this.mapTrack(track));
         }
 
         if (chunks.length > 1) {
@@ -81,7 +86,7 @@ export class SpotifyMetadataService {
         }
       } catch (err) {
         this.logger.error(
-          `Failed to fetch artist batch: ${(err as Error).message}`,
+          `Failed to fetch track batch [${chunk.join(',')}]: ${(err as Error).message}`,
         );
       }
     }
@@ -91,14 +96,18 @@ export class SpotifyMetadataService {
 
   // ── Mapping ───────────────────────────────────────────────────────────
 
-  private mapArtist(data: any): SpotifyArtistMetadata {
+  private mapTrack(track: any): SpotifyTrackMetadata {
     return {
-      spotifyId: data.id,
-      name: data.name ?? '',
-      imageUrl: data.images?.[0]?.url ?? null,
-      followers: data.followers?.total ?? 0,
-      popularity: data.popularity ?? 0,
-      genres: data.genres ?? [],
+      spotifyTrackId: track.id,
+      title: track.name,
+      spotifyAlbumId: track.album?.id ?? '',
+      albumName: track.album?.name ?? '',
+      albumType: track.album?.album_type ?? 'album',
+      albumImageUrl: track.album?.images?.[0]?.url ?? null,
+      releaseDate: track.album?.release_date ?? '',
+      totalTracks: track.album?.total_tracks ?? 0,
+      durationMs: track.duration_ms ?? 0,
+      explicit: track.explicit ?? false,
     };
   }
 

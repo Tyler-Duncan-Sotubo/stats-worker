@@ -24,7 +24,7 @@ export class DiscoveryJob {
     this.logger.log('Artist listener snapshot sync starting');
 
     const discovered = await this.discovery.discoverFromListenerPages([
-      1, 2, 3, 4,
+      1, 2, 3, 4, 5, 6, 7, 8,
     ]);
     await this.artistsService.syncListenerSnapshots(discovered.artists);
 

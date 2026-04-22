@@ -4,12 +4,10 @@ import Redis from 'ioredis';
 import { SongScraperService } from 'src/services/song-scraper.service';
 import { SongsRepository } from 'src/repository/songs.repository';
 
-const BATCH_SIZE = 100; // total songs picked per run
-const CONCURRENCY = 10; // never exceed 10 Spotify requests at once
-const DELAY_BETWEEN_GROUPS_MS = 500;
+const BATCH_SIZE = 50; // matches Spotify's batch limit — 1 API call per run
 const REDIS_CURSOR_KEY = 'job:song_enrichment:cursor';
 const REDIS_LOCK_KEY = 'job:song_enrichment:lock';
-const REDIS_LOCK_TTL_SECONDS = 60 * 15;
+const REDIS_LOCK_TTL_SECONDS = 60 * 5;
 
 @Injectable()
 export class SongEnrichmentJob {
@@ -36,6 +34,7 @@ export class SongEnrichmentJob {
 
       if (!pending.length) {
         await this.redis.del(REDIS_CURSOR_KEY);
+        this.logger.log('No songs pending enrichment');
         return;
       }
 
@@ -56,59 +55,50 @@ export class SongEnrichmentJob {
         `Processing songs ${cursor + 1}–${nextCursor} of ${pending.length} pending`,
       );
 
+      // Separate enrichable from skippable upfront
+      const enrichable = batch.filter((s) => !!s.spotifyTrackId);
+      const skipped = batch.filter((s) => !s.spotifyTrackId);
+
+      skipped.forEach((s) =>
+        this.logger.warn(`Skipping "${s.title}" — no spotifyTrackId`),
+      );
+
       let synced = 0;
-      let skipped = 0;
       let failed = 0;
 
-      for (let i = 0; i < batch.length; i += CONCURRENCY) {
-        const group = batch.slice(i, i + CONCURRENCY);
+      if (enrichable.length) {
+        // Group by artistId so enrichMany can batch album upserts per artist
+        const byArtist = new Map<string, typeof enrichable>();
 
-        const results = await Promise.allSettled(
-          group.map(async (song) => {
-            if (!song.spotifyTrackId) {
-              return { status: 'skipped' as const, song };
-            }
-
-            await this.songScraperService.enrichOne(
-              song.artistId,
-              song.spotifyTrackId,
-            );
-
-            return { status: 'synced' as const, song };
-          }),
-        );
-
-        for (const result of results) {
-          if (result.status === 'fulfilled') {
-            if (result.value.status === 'synced') {
-              synced += 1;
-            } else {
-              skipped += 1;
-              this.logger.warn(
-                `Skipping song "${result.value.song.title}" — no spotifyTrackId`,
-              );
-            }
-          } else {
-            failed += 1;
-            this.logger.error(
-              `Song enrichment failed — ${
-                result.reason instanceof Error
-                  ? result.reason.message
-                  : String(result.reason)
-              }`,
-            );
-          }
+        for (const song of enrichable) {
+          const group = byArtist.get(song.artistId) ?? [];
+          group.push(song);
+          byArtist.set(song.artistId, group);
         }
 
-        if (i + CONCURRENCY < batch.length) {
-          await this.sleep(DELAY_BETWEEN_GROUPS_MS);
+        for (const [artistId, songs] of byArtist) {
+          const spotifyTrackIds = songs.map((s) => s.spotifyTrackId as string);
+
+          try {
+            const results = await this.songScraperService.enrichMany(
+              artistId,
+              spotifyTrackIds,
+            );
+            synced += results.length;
+            failed += songs.length - results.length;
+          } catch (err) {
+            failed += songs.length;
+            this.logger.error(
+              `[Artist ${artistId}] enrichMany failed: ${(err as Error).message}`,
+            );
+          }
         }
       }
 
       await this.redis.set(REDIS_CURSOR_KEY, String(nextCursor));
 
       this.logger.log(
-        `Batch complete — ${synced} synced, ${skipped} skipped, ${failed} failed. ` +
+        `Batch complete — ${synced} synced, ${skipped.length} skipped, ${failed} failed. ` +
           `Next run starts at song ${nextCursor + 1}`,
       );
     } finally {
@@ -161,9 +151,5 @@ export class SongEnrichmentJob {
 
   private async releaseLock(): Promise<void> {
     await this.redis.del(REDIS_LOCK_KEY);
-  }
-
-  private async sleep(ms: number): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

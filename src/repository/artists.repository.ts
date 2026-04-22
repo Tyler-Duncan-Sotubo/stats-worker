@@ -1,11 +1,21 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, inArray, sql, isNull, isNotNull, and, gt } from 'drizzle-orm';
+import {
+  eq,
+  inArray,
+  sql,
+  isNull,
+  isNotNull,
+  and,
+  gt,
+  notExists,
+} from 'drizzle-orm';
 import { DRIZZLE } from 'src/infrastructure/drizzle/drizzle.module';
 import type { DrizzleDB } from 'src/infrastructure/drizzle/drizzle.module';
 import {
   artists,
   artistGenres,
   artistMonthlyListenerSnapshots,
+  artistStatsSnapshots,
 } from '../infrastructure/drizzle/schema';
 
 @Injectable()
@@ -120,6 +130,34 @@ export class ArtistsRepository {
     return result ?? null;
   }
 
+  async findBySpotifyIdWithoutSnapshotToday(
+    spotifyId: string,
+    snapshotDate: string,
+  ) {
+    const [result] = await this.db
+      .select()
+      .from(artists)
+      .where(
+        and(
+          eq(artists.spotifyId, spotifyId),
+          notExists(
+            this.db
+              .select({ artistId: artistStatsSnapshots.artistId })
+              .from(artistStatsSnapshots)
+              .where(
+                and(
+                  eq(artistStatsSnapshots.artistId, artists.id),
+                  eq(artistStatsSnapshots.snapshotDate, snapshotDate),
+                ),
+              ),
+          ),
+        ),
+      )
+      .limit(1);
+
+    return result ?? null;
+  }
+
   async findBySpotifyIds(spotifyIds: string[]) {
     if (!spotifyIds.length) return [];
 
@@ -130,20 +168,34 @@ export class ArtistsRepository {
   }
 
   async findAllWithSpotifyId() {
+    const latestListeners = this.db
+      .select({
+        artistId: artistMonthlyListenerSnapshots.artistId,
+        monthlyListeners: artistMonthlyListenerSnapshots.monthlyListeners,
+        rn: sql<number>`ROW_NUMBER() OVER (
+        PARTITION BY ${artistMonthlyListenerSnapshots.artistId}
+        ORDER BY ${artistMonthlyListenerSnapshots.snapshotDate} DESC
+      )`.as('rn'),
+      })
+      .from(artistMonthlyListenerSnapshots)
+      .as('latest_listeners');
+
     return this.db
       .select({
         id: artists.id,
-        name: artists.name,
         spotifyId: artists.spotifyId,
+        name: artists.name,
+        monthlyListeners: sql<number>`COALESCE(${latestListeners.monthlyListeners}, 0)`,
       })
       .from(artists)
-      .where(
-        sql`
-          ${artists.spotifyId} IS NOT NULL
-          AND (${artists.kworbStatus} IS NULL OR ${artists.kworbStatus} != 'not_found')
-          AND ${artists.entityStatus} != 'merged'
-        `,
-      );
+      .leftJoin(
+        latestListeners,
+        and(
+          eq(latestListeners.artistId, artists.id),
+          eq(latestListeners.rn, 1),
+        ),
+      )
+      .where(isNotNull(artists.spotifyId));
   }
 
   async findBySlug(slug: string) {

@@ -2,30 +2,32 @@ import { Injectable } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { DiscoveryJob } from './discovery/discovery.job';
 import { CertificationsJob } from './certifications/certifications.job';
-import { ArtistSnapshotJob } from './snapshots/artist-snapshot.job';
-import { SongSnapshotJob } from './snapshots/song-snapshot.job';
 import { DailyChartIngestionJob } from './charts/daily-chart-ingestion.job';
 import { RefreshMaterializedViewsJob } from './views/refresh-materialized-views.job';
 import { OriginCountryEnrichmentJob } from './origin/origin-country-enrichment.job';
 import { ArtistEnrichmentJob } from './catalog/artist-enrichment.job';
 import { SongEnrichmentJob } from './catalog/song-enrichment.job';
+import { UnifiedSnapshotJob } from './snapshots/unified-snapshot.job';
+import { OfficialChartsIngestionJob } from './charts/official-charts-injecton.job';
+import { BillboardIngestionJob } from './charts/billboard-injection.job';
 
 @Injectable()
 export class JobsScheduler {
   constructor(
     private readonly discoveryJob: DiscoveryJob,
     private readonly certificationsJob: CertificationsJob,
-    private readonly artistSnapshotJob: ArtistSnapshotJob,
-    private readonly songSnapshotJob: SongSnapshotJob,
     private readonly dailyChartIngestionJob: DailyChartIngestionJob,
     private readonly refreshMaterializedViewsJob: RefreshMaterializedViewsJob,
     private readonly originCountryEnrichmentJob: OriginCountryEnrichmentJob,
     private readonly artistEnrichmentJob: ArtistEnrichmentJob,
     private readonly songEnrichmentJob: SongEnrichmentJob,
+    private readonly unifiedSnapshotJob: UnifiedSnapshotJob,
+    private readonly officialChartsIngestionJob: OfficialChartsIngestionJob,
+    private readonly billboardIngestionJob: BillboardIngestionJob,
   ) {}
 
   // ───────────────────────────────────────────────────────────────────────────
-  // DISCOVERY + LISTENER SYNC
+  // DISCOVERY
   // ───────────────────────────────────────────────────────────────────────────
 
   // Weekly on Monday at 1:00 AM — discover artists and seed catalog
@@ -34,77 +36,101 @@ export class JobsScheduler {
     await this.discoveryJob.runDiscoveryAndSeed();
   }
 
-  // Daily at 8:00 PM — sync listener snapshots only
-  @Cron('0 20 * * *', { timeZone: 'Europe/London' })
+  // ───────────────────────────────────────────────────────────────────────────
+  // ENRICHMENT
+  // Artist + song enrichment disabled until Spotify rate limit issue resolved
+  // ───────────────────────────────────────────────────────────────────────────
+
+  @Cron('0 12 * * 2,3,4,5,6,0', { timeZone: 'Europe/London' })
   async runListenerSnapshotSync(): Promise<void> {
     await this.discoveryJob.runListenerSnapshotSync();
   }
+  // TODO: Done for now
+
+  // Certifications — every 4 minutes
+  // @Cron('* * * * *', { timeZone: 'Europe/London' })
+  // async runCertificationsBatch(): Promise<void> {
+  //   await this.certificationsJob.runBatch();
+  // }
+
+  // Origin country enrichment — every 5 minutes
+  // @Cron('*/5 * * * *', { timeZone: 'Europe/London' })
+  // async runOriginCountryEnrichment(): Promise<void> {
+  //   await this.originCountryEnrichmentJob.runBatch();
+  // }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // ENRICHMENT
+  // CHART INGESTION
+  // Daily charts run 3x per day to catch updates throughout the day
+  // Official + Billboard run weekly on their respective release days
   // ───────────────────────────────────────────────────────────────────────────
 
-  // Monthly on the 1st at 2:00 AM — enrich artists from Spotify
-  @Cron('0 2 1 * *', { timeZone: 'Europe/London' })
-  async runArtistEnrichment(): Promise<void> {
-    await this.artistEnrichmentJob.runBatch();
-  }
-
-  // Weekly on Sunday at 3:00 AM — enrich songs
-  @Cron('0 3 * * 0', { timeZone: 'Europe/London' })
-  async runSongEnrichment(): Promise<void> {
-    await this.songEnrichmentJob.runBatch();
-  }
-
-  // Temporary catch-up: every 20 minutes until caught up, then monthly on the 1st at 2:30 AM
-  // Monthly fallback: 2nd day of month at 4:00 AM
-  @Cron('*/20 * * * *', { timeZone: 'Europe/London' })
-  @Cron('0 4 2 * *', { timeZone: 'Europe/London' })
-  async runOriginCountryEnrichment(): Promise<void> {
-    await this.originCountryEnrichmentJob.runBatch();
-  }
-
-  // Temporary catch-up: every 30 minutes until caught up, then monthly on the 1st at 2:30 AM
-  // Monthly fallback: 2nd day of month at 5:00 AM
-  @Cron('*/30 * * * *', { timeZone: 'Europe/London' })
-  @Cron('0 5 2 * *', { timeZone: 'Europe/London' })
-  async runCertificationsBatch(): Promise<void> {
-    await this.certificationsJob.runBatch();
-  }
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // SNAPSHOTS
-  // ───────────────────────────────────────────────────────────────────────────
-
-  // Daily at 1:00 AM — artist snapshots
-  @Cron('0 1 * * *', { timeZone: 'Europe/London' })
-  async runArtistSnapshots(): Promise<void> {
-    await this.artistSnapshotJob.run();
-  }
-
-  // Daily at 2:10 PM — song snapshots
-  @Cron('10 14 * * *', { timeZone: 'Europe/London' })
-  async runSongSnapshots(): Promise<void> {
-    await this.songSnapshotJob.run();
-  }
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // INGESTION
-  // ───────────────────────────────────────────────────────────────────────────
-
-  // Daily at 2:00 PM — ingest latest daily charts
-  @Cron('0 14 * * *', { timeZone: 'Europe/London' })
-  async runDailyChartIngestion(): Promise<void> {
+  // 4:30 PM — midday run
+  @Cron('00 17 * * *', { timeZone: 'Europe/London' })
+  async runDailyChartIngestionMidday(): Promise<void> {
     await this.dailyChartIngestionJob.run();
+    await this.refreshMaterializedViewsJob.run();
+  }
+
+  // Every Friday at 8:00 PM — UK Official Charts
+  @Cron('0 20 * * 5', { timeZone: 'Europe/London' })
+  async runOfficialChartsIngestion(): Promise<void> {
+    await this.officialChartsIngestionJob.run();
+    await this.refreshMaterializedViewsJob.run();
+  }
+
+  // Every Saturday at 8:00 PM — Billboard
+  @Cron('0 20 * * 6', { timeZone: 'Europe/London' })
+  async runBillboardIngestion(): Promise<void> {
+    await this.billboardIngestionJob.run();
+    await this.refreshMaterializedViewsJob.run();
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // READ MODEL REFRESH
+  // LISTENER SNAPSHOTS
+  // Tier 1 — daily top ~200 artists (~15 mins)
+  // Tier 2 — Mon/Wed/Fri ~1,800 artists (~45 mins)
+  // Tier 3 — Mon/Wed ~mid tier
+  // Tier 4 — Sunday ~18,000 artists (~6 hours)
   // ───────────────────────────────────────────────────────────────────────────
 
-  // Daily at 14:00 PM — refresh materialized views
-  @Cron('0 15 * * *', { timeZone: 'Europe/London' })
-  async runDailyMaterializedViewRefresh(): Promise<void> {
+  // Tier 1 ≥ 8M — daily at 6:00 AM
+  @Cron('0 4 * * *', { timeZone: 'Europe/London' })
+  async runDailyTierSnapshot(): Promise<void> {
+    await this.unifiedSnapshotJob.run('daily');
+  }
+
+  // Tier 2 4.8M–8M — daily at 7:00 AM
+  @Cron('0 5 * * *', { timeZone: 'Europe/London' })
+  async runHighTierSnapshot(): Promise<void> {
+    await this.unifiedSnapshotJob.run('high');
+  }
+
+  // Tier 3 2.5M–4.8M — Mon, Wed at 2:00 AM
+  @Cron('29 8 * * *', { timeZone: 'Europe/London' })
+  async runMidTierSnapshot(): Promise<void> {
+    await this.unifiedSnapshotJob.run('mid');
+  }
+
+  // Tier 4 <2.5M — Sunday at 3:00 AM
+  @Cron('0 3 * * 0', { timeZone: 'Europe/London' })
+  async runLowTierSnapshot(): Promise<void> {
+    await this.unifiedSnapshotJob.run('low');
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // MATERIALIZED VIEW REFRESH
+  // Mon–Sat at 9:00 AM — after overnight jobs settle
+  // Sunday at 10:00 AM — gives Tier 4 (starts 3AM, ~6hrs) time to finish
+  // ───────────────────────────────────────────────────────────────────────────
+
+  @Cron('0 9 * * 1,2,3,4,5,6', { timeZone: 'Europe/London' })
+  async runWeekdayMaterializedViewRefresh(): Promise<void> {
+    await this.refreshMaterializedViewsJob.run();
+  }
+
+  @Cron('0 10 * * 0', { timeZone: 'Europe/London' })
+  async runSundayMaterializedViewRefresh(): Promise<void> {
     await this.refreshMaterializedViewsJob.run();
   }
 }
