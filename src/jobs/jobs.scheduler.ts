@@ -66,7 +66,7 @@ export class JobsScheduler {
   // ───────────────────────────────────────────────────────────────────────────
 
   // 7:00 PM — midday run
-  @Cron('00 19 * * *', { timeZone: 'Europe/London' })
+  @Cron('54 17 * * *', { timeZone: 'Europe/London' })
   async runDailyChartIngestionMidday(): Promise<void> {
     await this.dailyChartIngestionJob.run();
     await this.refreshMaterializedViewsJob.run();

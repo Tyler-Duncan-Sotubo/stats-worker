@@ -2,21 +2,21 @@ FROM node:22-bookworm
 
 WORKDIR /app
 
-# Install Playwright system dependencies at OS level first
-RUN npx playwright install-deps chromium
-
-# Install app dependencies
+# Install app dependencies first (better layer caching)
 COPY package*.json ./
 RUN npm ci
 
-# Install Playwright chromium binary
-RUN npx playwright install chromium
+# Install Playwright deps + binary
+RUN npx playwright install-deps chromium && \
+    npx playwright install chromium
 
-# Copy app source
+# Copy source (exclude dist via .dockerignore)
 COPY . .
 
-# Build NestJS
-RUN npm run build
+# Build and verify output exists
+RUN npm run build && \
+    ls -la dist/ && \
+    test -f dist/main.js || (echo "ERROR: dist/main.js not found after build" && exit 1)
 
 ENV NODE_ENV=production
 ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
