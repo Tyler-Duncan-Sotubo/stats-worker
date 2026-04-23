@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/prefer-promise-reject-errors */
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRedis } from '@nestjs-modules/ioredis';
@@ -9,17 +8,28 @@ import { SnapshotRepository } from 'src/repository/snapshot.repository';
 import { ArtistsRepository } from 'src/repository/artists.repository';
 import { SongScraperService } from './song-scraper.service';
 
-const TIER_DAILY_MIN = 8_000_000;
-const TIER_HIGH_MIN = 4_800_000;
-const TIER_MID_MIN = 2_500_000;
+const TIER_DAILY_MIN = 5_000_000;
+const TIER_HIGH_MIN = 3_000_000;
+const TIER_MID_MIN = 2_000_000;
+const TIER_MID2_MIN = 1_500_000;
+const TIER_MID3_MIN = 1_250_000;
+const TIER_MID4_MIN = 1_000_000;
+const TIER_LOW_MIN = 875_000;
+const TIER_LOW2_MIN = 750_000;
+const TIER_LOW3_MIN = 625_000;
 
-// Tune per tier — daily can be aggressive, low should be gentle
 const TIER_CONFIG: Record<TierFilter, { batchSize: number; sleepMs: number }> =
   {
     daily: { batchSize: 15, sleepMs: 1_000 },
     high: { batchSize: 15, sleepMs: 1_000 },
     mid: { batchSize: 10, sleepMs: 1_500 },
-    low: { batchSize: 5, sleepMs: 3_000 },
+    mid2: { batchSize: 10, sleepMs: 1_500 },
+    mid3: { batchSize: 10, sleepMs: 1_500 },
+    mid4: { batchSize: 10, sleepMs: 1_500 },
+    low: { batchSize: 5, sleepMs: 2_000 },
+    low2: { batchSize: 5, sleepMs: 2_000 },
+    low3: { batchSize: 5, sleepMs: 2_500 },
+    low4: { batchSize: 5, sleepMs: 3_000 },
     all: { batchSize: 5, sleepMs: 3_000 },
   };
 
@@ -28,13 +38,30 @@ const redisKey = (spotifyId: string, date: string) =>
 
 const TTL_SECONDS = 30 * 60 * 60;
 
-export type TierFilter = 'daily' | 'high' | 'mid' | 'low' | 'all';
+export type TierFilter =
+  | 'daily'
+  | 'high'
+  | 'mid'
+  | 'mid2'
+  | 'mid3'
+  | 'mid4'
+  | 'low'
+  | 'low2'
+  | 'low3'
+  | 'low4'
+  | 'all';
 
-function tierOf(monthlyListeners: number): 'daily' | 'high' | 'mid' | 'low' {
+function tierOf(monthlyListeners: number): Exclude<TierFilter, 'all'> {
   if (monthlyListeners >= TIER_DAILY_MIN) return 'daily';
   if (monthlyListeners >= TIER_HIGH_MIN) return 'high';
   if (monthlyListeners >= TIER_MID_MIN) return 'mid';
-  return 'low';
+  if (monthlyListeners >= TIER_MID2_MIN) return 'mid2';
+  if (monthlyListeners >= TIER_MID3_MIN) return 'mid3';
+  if (monthlyListeners >= TIER_MID4_MIN) return 'mid4';
+  if (monthlyListeners >= TIER_LOW_MIN) return 'low';
+  if (monthlyListeners >= TIER_LOW2_MIN) return 'low2';
+  if (monthlyListeners >= TIER_LOW3_MIN) return 'low3';
+  return 'low4';
 }
 
 function shouldRun(monthlyListeners: number, filter: TierFilter): boolean {
@@ -134,11 +161,9 @@ export class SnapshotService {
   ): Promise<number> {
     const key = redisKey(artist.spotifyId, snapshotDate);
 
-    // Check Redis first — cheapest check
     const alreadyDone = await this.redis.get(key);
     if (alreadyDone) return Promise.reject('SKIP');
 
-    // DB check second
     const existsInDb =
       await this.snapshotRepository.artistSnapshotExistsForDate(
         artist.id,
@@ -165,67 +190,64 @@ export class SnapshotService {
       sourceUpdatedAt: this.normalizeKworbDate(payload.totals.lastUpdated),
     });
 
-    // Process songs concurrently instead of sequentially
-    const songResults = await Promise.allSettled(
-      payload.songs.map((song) =>
-        this.snapshotSong(song, artist.id, snapshotDate),
-      ),
+    const featureSongs = payload.songs.filter((s) => s.isFeature);
+    const ownSongs = payload.songs.filter((s) => !s.isFeature);
+
+    const featureMap = await this.snapshotRepository.findManyBySpotifyTrackIds(
+      featureSongs.map((s) => s.spotifyTrackId),
     );
 
-    const songCount = songResults.filter(
-      (r) => r.status === 'fulfilled' && r.value,
-    ).length;
+    const songSnapshots: {
+      songId: string;
+      snapshotDate: string;
+      spotifyStreams: number | null;
+      dailyStreams: number | null;
+    }[] = [];
 
-    await this.redis.set(key, '1', 'EX', TTL_SECONDS);
-    return songCount;
-  }
+    const featureLinks: { songId: string; featuredArtistId: string }[] = [];
 
-  private async snapshotSong(
-    song: {
-      title: string;
-      spotifyTrackId: string;
-      streams: number;
-      dailyStreams: number;
-      isFeature: boolean;
-    },
-    artistId: string,
-    snapshotDate: string,
-  ): Promise<boolean> {
-    try {
-      if (song.isFeature) {
-        const existing = await this.snapshotRepository.findBySpotifyTrackId(
-          song.spotifyTrackId,
-        );
-        if (!existing) return false;
+    for (const song of featureSongs) {
+      const existing = featureMap.get(song.spotifyTrackId);
+      if (!existing) continue;
 
-        await Promise.all([
-          this.snapshotRepository.upsertSongSnapshot({
-            songId: existing.id,
-            snapshotDate,
-            spotifyStreams: song.streams,
-            dailyStreams: song.dailyStreams,
-          }),
-          this.snapshotRepository.ensureFeatureLink(existing.id, artistId),
-        ]);
-      } else {
+      songSnapshots.push({
+        songId: existing.id,
+        snapshotDate,
+        spotifyStreams: song.streams,
+        dailyStreams: song.dailyStreams,
+      });
+
+      featureLinks.push({ songId: existing.id, featuredArtistId: artist.id });
+    }
+
+    for (const song of ownSongs) {
+      try {
         const dbSong = await this.songScraperService.findOrCreate({
-          artistId,
+          artistId: artist.id,
           title: song.title,
           spotifyTrackId: song.spotifyTrackId,
         });
 
-        await this.snapshotRepository.upsertSongSnapshot({
+        songSnapshots.push({
           songId: dbSong.id,
           snapshotDate,
           spotifyStreams: song.streams,
           dailyStreams: song.dailyStreams,
         });
+      } catch {
+        // skip failed songs
       }
-      return true;
-    } catch {
-      return false;
     }
+
+    await Promise.all([
+      this.snapshotRepository.bulkUpsertSongSnapshots(songSnapshots),
+      this.snapshotRepository.bulkEnsureFeatureLinks(featureLinks),
+    ]);
+
+    await this.redis.set(key, '1', 'EX', TTL_SECONDS);
+    return songSnapshots.length;
   }
+
   private normalizeKworbDate(value?: string | null): string | null {
     if (!value) return null;
     const normalized = value.replace(/\//g, '-');

@@ -65,8 +65,8 @@ export class JobsScheduler {
   // Official + Billboard run weekly on their respective release days
   // ───────────────────────────────────────────────────────────────────────────
 
-  // 4:30 PM — midday run
-  @Cron('00 17 * * *', { timeZone: 'Europe/London' })
+  // 7:00 PM — midday run
+  @Cron('00 19 * * *', { timeZone: 'Europe/London' })
   async runDailyChartIngestionMidday(): Promise<void> {
     await this.dailyChartIngestionJob.run();
     await this.refreshMaterializedViewsJob.run();
@@ -88,36 +88,74 @@ export class JobsScheduler {
 
   // ───────────────────────────────────────────────────────────────────────────
   // LISTENER SNAPSHOTS
-  // Tier 1 — daily top ~200 artists (~15 mins)
-  // Tier 2 — Mon/Wed/Fri ~1,800 artists (~45 mins)
-  // Tier 3 — Mon/Wed ~mid tier
-  // Tier 4 — Sunday ~18,000 artists (~6 hours)
+  // Kworb update frequency observed:
+  //   daily tier  (≥5M)         — updates daily
+  //   high tier   (3M–5M)       — updates daily
+  //   mid  tier   (2M–3M)       — updates every 2–3 days
+  //   mid2 tier   (1.5M–2M)     — updates every 2–3 days
+  //   mid3+       (<1.5M)       — updates weekly or less
+  // All times Europe/London — data source updates by ~04:00
   // ───────────────────────────────────────────────────────────────────────────
 
-  // Tier 1 ≥ 8M — daily at 6:00 AM
+  // daily ≥ 5M — every day at 04:00
   @Cron('0 4 * * *', { timeZone: 'Europe/London' })
   async runDailyTierSnapshot(): Promise<void> {
     await this.unifiedSnapshotJob.run('daily');
   }
 
-  // Tier 2 4.8M–8M — daily at 7:00 AM
+  // high 3M–5M — every day at 05:00
   @Cron('0 5 * * *', { timeZone: 'Europe/London' })
   async runHighTierSnapshot(): Promise<void> {
     await this.unifiedSnapshotJob.run('high');
   }
 
-  // Tier 3 2.5M–4.8M — Mon, Wed at 2:00 AM
-  @Cron('29 8 * * *', { timeZone: 'Europe/London' })
+  // mid 2M–3M — Tue, Thu, Sat at 06:00
+  @Cron('0 6 * * 2,4,6', { timeZone: 'Europe/London' })
   async runMidTierSnapshot(): Promise<void> {
     await this.unifiedSnapshotJob.run('mid');
   }
 
-  // Tier 4 <2.5M — Sunday at 3:00 AM
-  @Cron('0 3 * * 0', { timeZone: 'Europe/London' })
+  // mid2 1.5M–2M — Tue, Thu, Sat at 08:00
+  @Cron('0 8 * * 2,4,6', { timeZone: 'Europe/London' })
+  async runMid2TierSnapshot(): Promise<void> {
+    await this.unifiedSnapshotJob.run('mid2');
+  }
+
+  // mid3 1.25M–1.5M — Mon, Thu at 10:00
+  @Cron('0 10 * * 1,4', { timeZone: 'Europe/London' })
+  async runMid3TierSnapshot(): Promise<void> {
+    await this.unifiedSnapshotJob.run('mid3');
+  }
+
+  // mid4 1M–1.25M — Mon, Thu at 12:00
+  @Cron('0 12 * * 1,4', { timeZone: 'Europe/London' })
+  async runMid4TierSnapshot(): Promise<void> {
+    await this.unifiedSnapshotJob.run('mid4');
+  }
+
+  // low 875K–1M — Wed at 14:00
+  @Cron('0 14 * * 3', { timeZone: 'Europe/London' })
   async runLowTierSnapshot(): Promise<void> {
     await this.unifiedSnapshotJob.run('low');
   }
 
+  // low2 750K–875K — Wed at 16:00
+  @Cron('0 16 * * 3', { timeZone: 'Europe/London' })
+  async runLow2TierSnapshot(): Promise<void> {
+    await this.unifiedSnapshotJob.run('low2');
+  }
+
+  // low3 625K–750K — Sat at 14:00
+  @Cron('0 14 * * 6', { timeZone: 'Europe/London' })
+  async runLow3TierSnapshot(): Promise<void> {
+    await this.unifiedSnapshotJob.run('low3');
+  }
+
+  // low4 <625K — Sat at 16:00
+  @Cron('0 16 * * 6', { timeZone: 'Europe/London' })
+  async runLow4TierSnapshot(): Promise<void> {
+    await this.unifiedSnapshotJob.run('low4');
+  }
   // ───────────────────────────────────────────────────────────────────────────
   // MATERIALIZED VIEW REFRESH
   // Mon–Sat at 9:00 AM — after overnight jobs settle

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { DRIZZLE } from 'src/infrastructure/drizzle/drizzle.module';
 import type { DrizzleDB } from 'src/infrastructure/drizzle/drizzle.module';
 import {
@@ -112,6 +112,20 @@ export class SnapshotRepository {
     return song ?? null;
   }
 
+  // ── NEW: batch lookup by multiple spotifyTrackIds ─────────────────────
+  async findManyBySpotifyTrackIds(
+    spotifyTrackIds: string[],
+  ): Promise<Map<string, typeof songs.$inferSelect>> {
+    if (!spotifyTrackIds.length) return new Map();
+
+    const rows = await this.db
+      .select()
+      .from(songs)
+      .where(inArray(songs.spotifyTrackId, spotifyTrackIds));
+
+    return new Map(rows.map((s) => [s.spotifyTrackId!, s]));
+  }
+
   async ensureFeatureLink(
     songId: string,
     featuredArtistId: string,
@@ -120,6 +134,15 @@ export class SnapshotRepository {
       .insert(songFeatures)
       .values({ songId, featuredArtistId })
       .onConflictDoNothing();
+  }
+
+  // ── NEW: batch ensure feature links ──────────────────────────────────
+  async bulkEnsureFeatureLinks(
+    links: { songId: string; featuredArtistId: string }[],
+  ): Promise<void> {
+    if (!links.length) return;
+
+    await this.db.insert(songFeatures).values(links).onConflictDoNothing();
   }
 
   async upsertSongSnapshot(data: {
@@ -146,6 +169,42 @@ export class SnapshotRepository {
       .returning();
 
     return row;
+  }
+
+  // ── NEW: bulk upsert song snapshots in one query ──────────────────────
+  async bulkUpsertSongSnapshots(
+    rows: {
+      songId: string;
+      snapshotDate: string;
+      spotifyStreams?: number | null;
+      dailyStreams?: number | null;
+    }[],
+  ): Promise<void> {
+    if (!rows.length) return;
+
+    const deduped = [
+      ...new Map(
+        rows.map((r) => [`${r.songId}:${r.snapshotDate}`, r]),
+      ).values(),
+    ];
+
+    await this.db
+      .insert(songStatsSnapshots)
+      .values(
+        deduped.map((r) => ({
+          songId: r.songId,
+          snapshotDate: r.snapshotDate,
+          spotifyStreams: r.spotifyStreams ?? null,
+          dailyStreams: r.dailyStreams ?? null,
+        })) as (typeof songStatsSnapshots.$inferInsert)[],
+      )
+      .onConflictDoUpdate({
+        target: [songStatsSnapshots.songId, songStatsSnapshots.snapshotDate],
+        set: {
+          spotifyStreams: sql`excluded.spotify_streams`,
+          dailyStreams: sql`excluded.daily_streams`,
+        },
+      });
   }
 
   async findSongSnapshot(songId: string, snapshotDate: string) {
