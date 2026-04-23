@@ -51,7 +51,8 @@ async function bootstrap() {
 
   const port = process.env.PORT || 8001;
   await app.listen(port, '0.0.0.0');
-  app.get(Logger).log(`🚀 Listening on port ${port}`);
+  const logger = app.get(Logger);
+  logger.log(`🚀 Listening on port ${port}`);
 }
 
 void bootstrap();
