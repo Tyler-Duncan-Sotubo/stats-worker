@@ -109,19 +109,19 @@ export class JobsScheduler {
     await this.unifiedSnapshotJob.run('high');
   }
 
-  // mid 2M–3M — Tue, Thu, Sat at 06:00
-  @Cron('0 6 * * 2,4,6', { timeZone: 'Europe/London' })
+  // mid 2M–3M — Tue, Thu, Sat at 10:00
+  @Cron('0 10 * * 2,4,6', { timeZone: 'Europe/London' })
   async runMidTierSnapshot(): Promise<void> {
     await this.unifiedSnapshotJob.run('mid');
   }
 
-  // mid2 1.5M–2M — Tue, Thu, Sat at 08:00
-  @Cron('0 8 * * 2,4,6', { timeZone: 'Europe/London' })
+  // mid2 1.5M–2M — Tue, Thu, Sat at 12:00
+  @Cron('0 12 * * 2,4,6', { timeZone: 'Europe/London' })
   async runMid2TierSnapshot(): Promise<void> {
     await this.unifiedSnapshotJob.run('mid2');
   }
 
-  // mid3 1.25M–1.5M — Mon, Thu at 10:00
+  // mid3 1.25M–1.5M — Mon, Thu at 10:00 (already after 10, keep days)
   @Cron('0 10 * * 1,4', { timeZone: 'Europe/London' })
   async runMid3TierSnapshot(): Promise<void> {
     await this.unifiedSnapshotJob.run('mid3');
@@ -133,29 +133,30 @@ export class JobsScheduler {
     await this.unifiedSnapshotJob.run('mid4');
   }
 
-  // low 875K–1M — Wed at 14:00
-  @Cron('0 14 * * 3', { timeZone: 'Europe/London' })
+  // low 875K–1M — Wed, Fri at 10:00 (Fri plugs the gap)
+  @Cron('0 10 * * 3,5', { timeZone: 'Europe/London' })
   async runLowTierSnapshot(): Promise<void> {
     await this.unifiedSnapshotJob.run('low');
   }
 
-  // low2 750K–875K — Wed at 16:00
-  @Cron('0 16 * * 3', { timeZone: 'Europe/London' })
+  // low2 750K–875K — Wed, Fri at 14:00
+  @Cron('0 14 * * 3,5', { timeZone: 'Europe/London' })
   async runLow2TierSnapshot(): Promise<void> {
     await this.unifiedSnapshotJob.run('low2');
   }
 
-  // low3 625K–750K — Sat at 14:00
-  @Cron('0 14 * * 6', { timeZone: 'Europe/London' })
+  // low3 625K–750K — Sat, Sun at 10:00 (Sun plugs the gap)
+  @Cron('0 10 * * 0,6', { timeZone: 'Europe/London' })
   async runLow3TierSnapshot(): Promise<void> {
     await this.unifiedSnapshotJob.run('low3');
   }
 
-  // low4 <625K — Sat at 16:00
-  @Cron('0 16 * * 6', { timeZone: 'Europe/London' })
+  // low4 <625K — Sat, Sun at 14:00
+  @Cron('0 14 * * 0,6', { timeZone: 'Europe/London' })
   async runLow4TierSnapshot(): Promise<void> {
     await this.unifiedSnapshotJob.run('low4');
   }
+
   // ───────────────────────────────────────────────────────────────────────────
   // MATERIALIZED VIEW REFRESH
   // Mon–Sat at 9:00 AM — after overnight jobs settle
