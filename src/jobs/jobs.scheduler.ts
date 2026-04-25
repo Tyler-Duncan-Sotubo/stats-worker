@@ -34,7 +34,7 @@ export class JobsScheduler {
   // Keeps only latest monthly listener snapshot per artist
   // ───────────────────────────────────────────────────────────────────────────
 
-  @Cron('36 22 * * *', { timeZone: 'Europe/London' })
+  @Cron('0 2 * * *', { timeZone: 'Europe/London' })
   async runNightlyCleanup(): Promise<void> {
     await this.cleanupJob.run();
   }
