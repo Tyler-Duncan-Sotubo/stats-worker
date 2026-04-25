@@ -27,7 +27,6 @@ DROP MATERIALIZED VIEW IF EXISTS song_search_summary CASCADE;
 
 -- =============================================================
 -- 1. SONG CHART SUMMARY
--- Aggregated chart performance per song per chart per territory
 -- =============================================================
 CREATE MATERIALIZED VIEW song_chart_summary AS
 WITH base AS (
@@ -83,7 +82,7 @@ SELECT
   agg.last_charted
 FROM aggregated agg
 JOIN songs   s ON s.id = agg.song_id
-JOIN artists a ON a.id = s.artist_id; -- ← via songs not chart_entries
+JOIN artists a ON a.id = s.artist_id;
 
 CREATE UNIQUE INDEX idx_scs_unique
   ON song_chart_summary (song_id, chart_name, chart_territory);
@@ -102,7 +101,6 @@ CREATE INDEX idx_scs_afrobeats
 
 -- =============================================================
 -- 2. CHART LATEST LEADERBOARD
--- Current week position per song per chart — newest chart_week wins
 -- =============================================================
 CREATE MATERIALIZED VIEW chart_latest_leaderboard AS
 SELECT DISTINCT ON (
@@ -151,10 +149,8 @@ CREATE INDEX idx_cll_afrobeats
 CREATE INDEX idx_cll_artist
   ON chart_latest_leaderboard (artist_id);
 
-
 -- =============================================================
 -- 3. ARTIST STREAM SUMMARY
--- Latest snapshot totals per artist
 -- =============================================================
 CREATE MATERIALIZED VIEW artist_stream_summary AS
 SELECT DISTINCT ON (ass.artist_id)
@@ -187,10 +183,8 @@ CREATE INDEX idx_asm_daily
 CREATE INDEX idx_asm_country
   ON artist_stream_summary (origin_country, total_streams DESC NULLS LAST);
 
-
 -- =============================================================
 -- 4. SONG STREAM SUMMARY
--- Latest snapshot per song
 -- =============================================================
 CREATE MATERIALIZED VIEW song_stream_summary AS
 SELECT DISTINCT ON (sss.song_id)
@@ -228,10 +222,8 @@ CREATE INDEX idx_ssm_artist
 CREATE INDEX idx_ssm_release
   ON song_stream_summary (release_date DESC NULLS LAST);
 
-
 -- =============================================================
 -- 5. ARTIST CERTIFICATION SUMMARY
--- Aggregated RIAA/BPI counts and units per artist per territory per body
 -- =============================================================
 CREATE MATERIALIZED VIEW artist_certification_summary AS
 SELECT
@@ -270,13 +262,10 @@ CREATE INDEX idx_acm_units
 CREATE INDEX idx_acm_total
   ON artist_certification_summary (territory, body, total_certifications DESC);
 
-
 -- =============================================================
 -- 6. ARTIST CHART SUMMARY
--- Aggregated chart performance at artist level — primary + feature
 -- =============================================================
 CREATE MATERIALIZED VIEW artist_chart_summary AS
-
 SELECT
   a.id                                          AS artist_id,
   a.name                                        AS artist_name,
@@ -324,8 +313,8 @@ SELECT
   MAX(ce.chart_week)                            AS latest_chart_appearance,
   'feature'                                     AS role
 FROM song_features sf
-JOIN artists      a  ON sf.featured_artist_id = a.id
-JOIN chart_entries ce ON ce.song_id           = sf.song_id
+JOIN artists       a  ON sf.featured_artist_id = a.id
+JOIN chart_entries ce ON ce.song_id            = sf.song_id
 WHERE ce.song_id IS NOT NULL
 GROUP BY
   a.id, a.name, a.slug, a.image_url,
@@ -343,7 +332,6 @@ CREATE INDEX idx_achs_number_1
   ON artist_chart_summary (chart_territory, chart_name, weeks_at_number_1 DESC);
 CREATE INDEX idx_achs_peak
   ON artist_chart_summary (chart_territory, chart_name, best_peak_position ASC);
-
 
 -- =============================================================
 -- 7. ARTIST AWARDS SUMMARY
@@ -380,7 +368,6 @@ CREATE INDEX idx_aas_body
 CREATE INDEX idx_aas_afrobeats
   ON artist_awards_summary (is_afrobeats, award_body, year DESC);
 
-
 -- =============================================================
 -- 8. ARTIST RECORDS SUMMARY
 -- =============================================================
@@ -415,10 +402,9 @@ CREATE INDEX idx_ars_scope
 CREATE INDEX idx_ars_afrobeats
   ON artist_records_summary (is_afrobeats, is_active);
 
-
 -- =============================================================
 -- 9. ARTIST GROWTH SUMMARY
--- Daily and 7-day stream growth per artist per snapshot
+-- Only today's snapshot — keeps refresh fast
 -- =============================================================
 CREATE MATERIALIZED VIEW artist_growth_summary AS
 SELECT
@@ -436,11 +422,12 @@ SELECT
 FROM artist_stats_snapshots s1
 JOIN artists a ON a.id = s1.artist_id
 LEFT JOIN artist_stats_snapshots s0
-  ON s1.artist_id    = s0.artist_id
+  ON s1.artist_id      = s0.artist_id
   AND s0.snapshot_date = s1.snapshot_date - INTERVAL '1 day'
 LEFT JOIN artist_stats_snapshots s7
-  ON s1.artist_id    = s7.artist_id
-  AND s7.snapshot_date = s1.snapshot_date - INTERVAL '7 days';
+  ON s1.artist_id      = s7.artist_id
+  AND s7.snapshot_date = s1.snapshot_date - INTERVAL '7 days'
+WHERE s1.snapshot_date = CURRENT_DATE;
 
 CREATE UNIQUE INDEX idx_ags_unique
   ON artist_growth_summary (artist_id, snapshot_date);
@@ -451,10 +438,8 @@ CREATE INDEX idx_ags_7d_growth
 CREATE INDEX idx_ags_afrobeats
   ON artist_growth_summary (is_afrobeats, snapshot_date, growth_7d DESC);
 
-
 -- =============================================================
 -- 10. ARTIST TRENDING SUMMARY
--- Momentum score = weighted growth (depends on artist_growth_summary)
 -- =============================================================
 CREATE MATERIALIZED VIEW artist_trending_summary AS
 SELECT
@@ -472,10 +457,9 @@ CREATE INDEX idx_ats_momentum
 CREATE INDEX idx_ats_afrobeats
   ON artist_trending_summary (is_afrobeats, snapshot_date, momentum_score DESC);
 
-
 -- =============================================================
 -- 11. SONG GROWTH SUMMARY
--- Daily and 7-day stream growth per song per snapshot
+-- Only today's snapshot — keeps refresh fast
 -- =============================================================
 CREATE MATERIALIZED VIEW song_growth_summary AS
 SELECT
@@ -488,17 +472,18 @@ SELECT
   s1.snapshot_date,
   s1.daily_streams,
   s1.spotify_streams                            AS total_streams,
-  (s1.daily_streams    - s0.daily_streams)      AS daily_growth,
-  (s1.spotify_streams  - s7.spotify_streams)    AS growth_7d
+  (s1.daily_streams   - s0.daily_streams)       AS daily_growth,
+  (s1.spotify_streams - s7.spotify_streams)     AS growth_7d
 FROM song_stats_snapshots s1
 JOIN songs   s ON s.id = s1.song_id
 JOIN artists a ON a.id = s.artist_id
 LEFT JOIN song_stats_snapshots s0
-  ON s1.song_id      = s0.song_id
+  ON s1.song_id        = s0.song_id
   AND s0.snapshot_date = s1.snapshot_date - INTERVAL '1 day'
 LEFT JOIN song_stats_snapshots s7
-  ON s1.song_id      = s7.song_id
-  AND s7.snapshot_date = s1.snapshot_date - INTERVAL '7 days';
+  ON s1.song_id        = s7.song_id
+  AND s7.snapshot_date = s1.snapshot_date - INTERVAL '7 days'
+WHERE s1.snapshot_date = CURRENT_DATE;
 
 CREATE UNIQUE INDEX idx_sgs_unique
   ON song_growth_summary (song_id, snapshot_date);
@@ -507,10 +492,8 @@ CREATE INDEX idx_sgs_daily_growth
 CREATE INDEX idx_sgs_7d_growth
   ON song_growth_summary (snapshot_date, growth_7d DESC);
 
-
 -- =============================================================
 -- 12. SONG TRENDING SUMMARY
--- Momentum score per song (depends on song_growth_summary)
 -- =============================================================
 CREATE MATERIALIZED VIEW song_trending_summary AS
 SELECT
@@ -526,10 +509,8 @@ CREATE UNIQUE INDEX idx_sts_unique
 CREATE INDEX idx_sts_momentum
   ON song_trending_summary (snapshot_date, momentum_score DESC);
 
-
 -- =============================================================
 -- 13. ARTIST MONTHLY LISTENER SUMMARY
--- Latest listener snapshot per artist
 -- =============================================================
 CREATE MATERIALIZED VIEW artist_monthly_listener_summary AS
 SELECT
@@ -563,19 +544,13 @@ CREATE INDEX idx_amlsum_afrobeats
   ON artist_monthly_listener_summary (is_afrobeats, monthly_listeners DESC);
 CREATE INDEX idx_amlsum_country
   ON artist_monthly_listener_summary (origin_country, monthly_listeners DESC);
-
--- keep this too — still useful for filtered queries
 CREATE INDEX idx_amlsum_listeners
   ON artist_monthly_listener_summary (monthly_listeners DESC);
-
--- add this new one
 CREATE INDEX idx_amlsum_global_rank
   ON artist_monthly_listener_summary (global_rank);
 
-
 -- =============================================================
 -- 14. ARTIST RECENT CHART SUMMARY
--- Chart activity in the last 90 days
 -- =============================================================
 CREATE MATERIALIZED VIEW artist_recent_chart_summary AS
 SELECT
@@ -608,10 +583,8 @@ CREATE INDEX idx_arcs_top10
 CREATE INDEX idx_arcs_peak
   ON artist_recent_chart_summary (chart_territory, chart_name, best_peak ASC);
 
-
 -- =============================================================
 -- 15. ARTIST COUNTRY SUMMARY
--- Per-country stream leaderboard (depends on artist_stream_summary)
 -- =============================================================
 CREATE MATERIALIZED VIEW artist_country_summary AS
 SELECT
@@ -633,10 +606,8 @@ CREATE INDEX idx_acs_streams
 CREATE INDEX idx_acs_daily
   ON artist_country_summary (origin_country, daily_streams DESC);
 
-
 -- =============================================================
 -- 16. SONG SEARCH SUMMARY
--- Full-text searchable song index for ask module song resolution
 -- =============================================================
 CREATE MATERIALIZED VIEW song_search_summary AS
 SELECT
@@ -671,4 +642,3 @@ CREATE INDEX idx_sss_artist
   ON song_search_summary (artist_id);
 CREATE INDEX idx_sss_afrobeats
   ON song_search_summary (is_afrobeats, total_streams DESC NULLS LAST);
-

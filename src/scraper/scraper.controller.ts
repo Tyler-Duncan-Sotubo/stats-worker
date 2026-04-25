@@ -1,10 +1,12 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Query, Param, Post } from '@nestjs/common';
 import { SpotifyOfficialChartsService } from './chart/spotify-official-charts.service';
+import { AudiomackScraperService } from './audiomack/audiomack-scraper.service';
 
 @Controller('scraper')
 export class ScraperController {
   constructor(
     private readonly spotifyOfficialChartsService: SpotifyOfficialChartsService,
+    private readonly audiomackScraperService: AudiomackScraperService,
   ) {}
 
   @Get('daily')
@@ -22,5 +24,20 @@ export class ScraperController {
   async spotifyLogin() {
     await this.spotifyOfficialChartsService.saveLoginSessionLocal();
     return { ok: true };
+  }
+
+  @Get('audiomack/:slug')
+  async getAudiomackArtist(@Param('slug') slug: string) {
+    return this.audiomackScraperService.scrapeArtist(slug);
+  }
+
+  @Get('audiomack')
+  async getAudiomackAll() {
+    return this.audiomackScraperService.discoverAudiomackSlugs();
+  }
+
+  @Post('audiomack-scrape')
+  async scrapeAudiomackArtist() {
+    return this.audiomackScraperService.scrapeAll();
   }
 }

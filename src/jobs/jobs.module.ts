@@ -13,6 +13,7 @@ import { ScraperModule } from 'src/scraper/scraper.module';
 import { UnifiedSnapshotJob } from './snapshots/unified-snapshot.job';
 import { OfficialChartsIngestionJob } from './charts/official-charts-injecton.job';
 import { BillboardIngestionJob } from './charts/billboard-injection.job';
+import { CleanupJob } from './cleanup/cleanup.job';
 
 @Module({
   imports: [RepositoryModule, ServicesModule, ScraperModule],
@@ -28,6 +29,7 @@ import { BillboardIngestionJob } from './charts/billboard-injection.job';
     ArtistEnrichmentJob,
     OfficialChartsIngestionJob,
     BillboardIngestionJob,
+    CleanupJob,
   ],
   exports: [
     DiscoveryJob,

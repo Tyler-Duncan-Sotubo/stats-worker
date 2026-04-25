@@ -18,6 +18,7 @@ import { EntityResolutionService } from 'src/services/entity-resolution.service'
 import { ArtistsRepository } from 'src/repository/artists.repository';
 import { SpotifyAuthService } from 'src/services/spotify-auth.service';
 import { SpotifyOfficialChartsService } from './chart/spotify-official-charts.service';
+import { AudiomackScraperService } from './audiomack/audiomack-scraper.service';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { SpotifyOfficialChartsService } from './chart/spotify-official-charts.se
     ArtistsRepository,
     SpotifyAuthService,
     SpotifyOfficialChartsService,
+    AudiomackScraperService,
   ],
   exports: [
     KworbArtistDiscoveryService,
@@ -57,6 +59,7 @@ import { SpotifyOfficialChartsService } from './chart/spotify-official-charts.se
     OfficialChartsBackfillService,
     BillboardBackfillService,
     SpotifyOfficialChartsService,
+    AudiomackScraperService,
   ],
 })
 export class ScraperModule {}

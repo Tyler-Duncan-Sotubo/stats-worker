@@ -16,7 +16,7 @@
     "paths": {
       "src/*": ["./src/*"]
     },
-    "incremental": true,
+    "incremental": false,
     "skipLibCheck": true,
     "strict": true,
     "forceConsistentCasingInFileNames": true,

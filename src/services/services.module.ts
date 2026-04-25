@@ -12,6 +12,7 @@ import { RiaaCertificationService } from 'src/scraper/services/riaa-certificatio
 import { ScraperModule } from 'src/scraper/scraper.module';
 import { SongMetadataService } from './song-metadata.service';
 import { SpotifyAuthService } from './spotify-auth.service';
+import { CleanupService } from './cleanup.service';
 
 @Module({
   imports: [RepositoryModule, ScraperModule],
@@ -27,6 +28,7 @@ import { SpotifyAuthService } from './spotify-auth.service';
     RiaaCertificationService,
     SongMetadataService,
     SpotifyAuthService,
+    CleanupService,
   ],
   exports: [
     AlbumScraperService,
@@ -38,6 +40,7 @@ import { SpotifyAuthService } from './spotify-auth.service';
     ViewsRefreshService,
     SongMetadataService,
     SpotifyAuthService,
+    CleanupService,
   ],
 })
 export class ServicesModule {}
