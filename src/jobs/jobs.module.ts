@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-// import { JobsScheduler } from './jobs.scheduler';
+import { JobsScheduler } from './jobs.scheduler';
 import { DiscoveryJob } from './discovery/discovery.job';
 import { CertificationsJob } from './certifications/certifications.job';
 import { DailyChartIngestionJob } from './charts/daily-chart-ingestion.job';
@@ -18,7 +18,7 @@ import { CleanupJob } from './cleanup/cleanup.job';
 @Module({
   imports: [RepositoryModule, ServicesModule, ScraperModule],
   providers: [
-    // JobsScheduler,
+    JobsScheduler,
     DiscoveryJob,
     CertificationsJob,
     UnifiedSnapshotJob,

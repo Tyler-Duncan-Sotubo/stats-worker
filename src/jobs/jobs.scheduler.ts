@@ -128,7 +128,7 @@ export class JobsScheduler {
   // Billboard every Saturday at 7:00 PM — after Billboard release
   // ───────────────────────────────────────────────────────────────────────────
 
-  @Cron('0 18 * * *', { timeZone: 'Europe/London' })
+  @Cron('00 19 * * *', { timeZone: 'Europe/London' })
   async runDailyChartIngestion(): Promise<void> {
     await this.dailyChartIngestionJob.run();
   }
