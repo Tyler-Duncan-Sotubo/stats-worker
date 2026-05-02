@@ -43,6 +43,11 @@ export class JobsScheduler {
     await this.vacuumService.run();
   }
 
+  @Cron('0 7 * * *', { timeZone: 'Europe/London' })
+  async runAmVacuum(): Promise<void> {
+    await this.vacuumService.run();
+  }
+
   @Cron('0 12 * * *', { timeZone: 'Europe/London' })
   async runMiddayVacuum(): Promise<void> {
     await this.vacuumService.run();
@@ -61,6 +66,11 @@ export class JobsScheduler {
   @Cron('0 3 * * 1', { timeZone: 'Europe/London' })
   async runArtistDiscovery(): Promise<void> {
     await this.discoveryJob.runDiscoveryAndSeed();
+  }
+
+  @Cron('30 11 * * *', { timeZone: 'Europe/London' })
+  async runListenerSnapshotSync(): Promise<void> {
+    await this.discoveryJob.runListenerSnapshotSync();
   }
 
   // ───────────────────────────────────────────────────────────────────────────
