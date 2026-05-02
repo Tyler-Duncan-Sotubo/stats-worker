@@ -11,6 +11,7 @@ import { UnifiedSnapshotJob } from './snapshots/unified-snapshot.job';
 import { OfficialChartsIngestionJob } from './charts/official-charts-injecton.job';
 import { BillboardIngestionJob } from './charts/billboard-injection.job';
 import { CleanupJob } from './cleanup/cleanup.job';
+import { VacuumService } from 'src/services/vacuum.service';
 
 @Injectable()
 export class JobsScheduler {
@@ -26,19 +27,31 @@ export class JobsScheduler {
     private readonly officialChartsIngestionJob: OfficialChartsIngestionJob,
     private readonly billboardIngestionJob: BillboardIngestionJob,
     private readonly cleanupJob: CleanupJob,
+    private readonly vacuumService: VacuumService,
   ) {}
 
   // ───────────────────────────────────────────────────────────────────────────
-  // CLEANUP
-  // 2:00 AM daily — runs first, before any scrape jobs start
-  // Keeps only latest monthly listener snapshot per artist
+  // VACUUM
+  // 12:00 AM — clean slate before scraping starts
+  // 12:00 PM — midday clean during scraping
+  // 4:00 PM  — afternoon clean before chart ingestion
+  // 9:00 PM  — MV refresh handles post-write vacuum automatically
   // ───────────────────────────────────────────────────────────────────────────
 
-  // @Cron('0 2 * * *', { timeZone: 'Europe/London' })
-  // async runNightlyCleanup(): Promise<void> {
-  //   await this.cleanupJob.run();
-  // }
+  @Cron('0 0 * * *', { timeZone: 'Europe/London' })
+  async runMidnightVacuum(): Promise<void> {
+    await this.vacuumService.run();
+  }
 
+  @Cron('0 12 * * *', { timeZone: 'Europe/London' })
+  async runMiddayVacuum(): Promise<void> {
+    await this.vacuumService.run();
+  }
+
+  @Cron('0 16 * * *', { timeZone: 'Europe/London' })
+  async runAfternoonVacuum(): Promise<void> {
+    await this.vacuumService.run();
+  }
   // ───────────────────────────────────────────────────────────────────────────
   // DISCOVERY
   // Weekly on Monday at 3:00 AM — discover artists and seed catalog

@@ -13,6 +13,7 @@ import { ScraperModule } from 'src/scraper/scraper.module';
 import { SongMetadataService } from './song-metadata.service';
 import { SpotifyAuthService } from './spotify-auth.service';
 import { CleanupService } from './cleanup.service';
+import { VacuumService } from './vacuum.service';
 
 @Module({
   imports: [RepositoryModule, ScraperModule],
@@ -29,6 +30,7 @@ import { CleanupService } from './cleanup.service';
     SongMetadataService,
     SpotifyAuthService,
     CleanupService,
+    VacuumService,
   ],
   exports: [
     AlbumScraperService,
@@ -41,6 +43,7 @@ import { CleanupService } from './cleanup.service';
     SongMetadataService,
     SpotifyAuthService,
     CleanupService,
+    VacuumService,
   ],
 })
 export class ServicesModule {}
