@@ -3,17 +3,17 @@ import { sql } from 'drizzle-orm';
 import { DRIZZLE } from 'src/infrastructure/drizzle/drizzle.module';
 import type { DrizzleDB } from 'src/infrastructure/drizzle/drizzle.module';
 
-// Views with no dependencies — safe to refresh in parallel
+// Views with no dependencies — refreshed sequentially to control memory
 const GROUP_1_VIEWS = [
+  'artist_stream_summary', // largest — do first
+  'song_stream_summary', // second largest
+  'artist_monthly_listener_summary',
+  'artist_chart_summary',
   'song_chart_summary',
   'chart_latest_leaderboard',
-  'artist_stream_summary',
-  'song_stream_summary',
   'artist_certification_summary',
-  'artist_chart_summary',
   'artist_awards_summary',
   'artist_records_summary',
-  'artist_monthly_listener_summary',
   'artist_recent_chart_summary',
   'artist_growth_summary',
   'song_growth_summary',
@@ -42,17 +42,21 @@ export class ViewsRefreshService {
     const totalStart = Date.now();
     this.logger.log('Starting full materialized view refresh...');
 
-    // Group 1: all independent views in parallel
+    // Group 1: sequential to keep memory under control
     this.logger.log(
-      `Refreshing ${GROUP_1_VIEWS.length} base views in parallel...`,
+      `Refreshing ${GROUP_1_VIEWS.length} base views sequentially...`,
     );
-    await Promise.all(GROUP_1_VIEWS.map((view) => this.refreshView(view)));
+    for (const view of GROUP_1_VIEWS) {
+      await this.refreshView(view);
+    }
 
-    // Group 2: dependent views in parallel, after group 1
+    // Group 2: sequential after group 1 completes
     this.logger.log(
-      `Refreshing ${GROUP_2_VIEWS.length} dependent views in parallel...`,
+      `Refreshing ${GROUP_2_VIEWS.length} dependent views sequentially...`,
     );
-    await Promise.all(GROUP_2_VIEWS.map((view) => this.refreshView(view)));
+    for (const view of GROUP_2_VIEWS) {
+      await this.refreshView(view);
+    }
 
     this.logger.log(`Full refresh completed in ${Date.now() - totalStart}ms`);
   }
