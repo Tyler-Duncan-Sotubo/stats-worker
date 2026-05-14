@@ -14,6 +14,9 @@ import { UnifiedSnapshotJob } from './snapshots/unified-snapshot.job';
 import { OfficialChartsIngestionJob } from './charts/official-charts-injecton.job';
 import { BillboardIngestionJob } from './charts/billboard-injection.job';
 import { CleanupJob } from './cleanup/cleanup.job';
+import { AlbumBackfillJob } from './catalog/album-backfilljob';
+import { MilestoneDetectorService } from './milestone/milestone-detector.service';
+import { MilestoneDetectionJob } from './milestone/milestone-detector.job';
 
 @Module({
   imports: [RepositoryModule, ServicesModule, ScraperModule],
@@ -30,12 +33,16 @@ import { CleanupJob } from './cleanup/cleanup.job';
     OfficialChartsIngestionJob,
     BillboardIngestionJob,
     CleanupJob,
+    AlbumBackfillJob,
+    MilestoneDetectorService,
+    MilestoneDetectionJob,
   ],
   exports: [
     DiscoveryJob,
     CertificationsJob,
     DailyChartIngestionJob,
     RefreshMaterializedViewsJob,
+    MilestoneDetectorService,
   ],
 })
 export class JobsModule {}

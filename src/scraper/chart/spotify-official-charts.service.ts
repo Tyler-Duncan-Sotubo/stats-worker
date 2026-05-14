@@ -11,6 +11,7 @@ export interface SpotifyOfficialChartRow {
   title: string;
   imageUrl?: string;
   spotifyUrl?: string;
+  spotifyTrackId?: string | null; // add this
   streams?: number | null;
 }
 
@@ -29,6 +30,11 @@ export class SpotifyOfficialChartsService {
   private readonly logger = new Logger(SpotifyOfficialChartsService.name);
 
   constructor(private readonly config: ConfigService) {}
+
+  // Add to SpotifyOfficialChartsService
+  async getBearerToken(country = 'ng'): Promise<string> {
+    return this.extractToken(country);
+  }
 
   // ─── 1. LOCAL ONLY: Manual login, saves session to disk ──────────────────
   // Run this on your laptop when you need to refresh the session manually.
@@ -312,6 +318,7 @@ export class SpotifyOfficialChartsService {
         .map((a: any) => a.name as string)
         .join(', '),
       streams: entry.chartEntryData?.rankingMetric?.value ?? null,
+      spotifyTrackId: trackId ?? null, // add this
       spotifyUrl: trackId
         ? `https://open.spotify.com/track/${trackId}`
         : undefined,

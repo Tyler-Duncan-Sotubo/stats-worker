@@ -1,8 +1,6 @@
-/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import axios, { AxiosResponse } from 'axios';
-import { SpotifyAuthService } from './spotify-auth.service';
+import { SpotifyOfficialChartsService } from 'src/scraper/chart/spotify-official-charts.service';
 
 export interface SpotifyTrackMetadata {
   spotifyTrackId: string;
@@ -11,7 +9,7 @@ export interface SpotifyTrackMetadata {
   albumName: string;
   albumType: string;
   albumImageUrl: string | null;
-  releaseDate: string;
+  releaseDate: string | null; // was string
   totalTracks: number;
   durationMs: number;
   explicit: boolean;
@@ -20,17 +18,38 @@ export interface SpotifyTrackMetadata {
 @Injectable()
 export class SongMetadataService {
   private readonly logger = new Logger(SongMetadataService.name);
-  private accessToken: string | null = null;
-  private tokenExpiresAt = 0;
+  private tokenCache: { token: string; expiresAt: number } | null = null;
 
   constructor(
-    private readonly config: ConfigService,
-    private readonly spotifyAuth: SpotifyAuthService,
+    private readonly spotifyOfficialChartsService: SpotifyOfficialChartsService,
   ) {}
 
+  // ── Token management ──────────────────────────────────────────────────
+
+  private async getFreshToken(): Promise<string> {
+    if (
+      this.tokenCache &&
+      Date.now() < this.tokenCache.expiresAt - 5 * 60 * 1000
+    ) {
+      return this.tokenCache.token;
+    }
+
+    this.logger.log('Fetching Spotify Bearer token via Playwright...');
+    const token = await this.spotifyOfficialChartsService.getBearerToken('ng');
+
+    this.tokenCache = {
+      token,
+      expiresAt: Date.now() + 50 * 60 * 1000,
+    };
+
+    this.logger.log('Bearer token acquired ✓');
+    return token;
+  }
+
   // ── Auth ──────────────────────────────────────────────────────────────
+
   private async get<T>(path: string, retry = true): Promise<T> {
-    const token = await this.spotifyAuth.getAccessToken();
+    const token = await this.getFreshToken();
 
     try {
       const response: AxiosResponse<T> = await axios.get(
@@ -40,7 +59,7 @@ export class SongMetadataService {
           timeout: 10_000,
         },
       );
-      return response.data as T;
+      return response.data;
     } catch (err) {
       if (
         retry &&
@@ -50,7 +69,7 @@ export class SongMetadataService {
         this.logger.warn(
           'Spotify token rejected — forcing refresh and retrying',
         );
-        this.spotifyAuth.invalidate();
+        this.tokenCache = null;
         return this.get<T>(path, false);
       }
       throw err;
@@ -85,9 +104,18 @@ export class SongMetadataService {
           await this.sleep(300);
         }
       } catch (err) {
-        this.logger.error(
-          `Failed to fetch track batch [${chunk.join(',')}]: ${(err as Error).message}`,
-        );
+        if (axios.isAxiosError(err)) {
+          this.logger.error(
+            `Spotify /tracks error — ` +
+              `status: ${err.response?.status}, ` +
+              `body: ${JSON.stringify(err.response?.data)}, ` +
+              `headers: ${JSON.stringify(err.response?.headers)}`,
+          );
+        } else {
+          this.logger.error(
+            `Failed to fetch track batch [${chunk.join(',')}]: ${(err as Error).message}`,
+          );
+        }
       }
     }
 
@@ -104,7 +132,7 @@ export class SongMetadataService {
       albumName: track.album?.name ?? '',
       albumType: track.album?.album_type ?? 'album',
       albumImageUrl: track.album?.images?.[0]?.url ?? null,
-      releaseDate: track.album?.release_date ?? '',
+      releaseDate: this.normalizeReleaseDate(track.album?.release_date),
       totalTracks: track.album?.total_tracks ?? 0,
       durationMs: track.duration_ms ?? 0,
       explicit: track.explicit ?? false,
@@ -121,5 +149,12 @@ export class SongMetadataService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((r) => setTimeout(r, ms));
+  }
+
+  private normalizeReleaseDate(date: string | undefined): string | null {
+    if (!date) return null;
+    if (/^\d{4}$/.test(date)) return `${date}-01-01`;
+    if (/^\d{4}-\d{2}$/.test(date)) return `${date}-01`;
+    return date;
   }
 }

@@ -4,7 +4,7 @@ import Redis from 'ioredis';
 import { ArtistsRepository } from 'src/repository/artists.repository';
 import { ArtistsService } from 'src/services/artists.service';
 
-const BATCH_SIZE = 25; // was 100 — 4x fewer Spotify calls per run
+const BATCH_SIZE = 50; // was 100 — 4x fewer Spotify calls per run
 const REDIS_CURSOR_KEY = 'job:artist_enrichment:last_artist_id';
 const REDIS_LOCK_KEY = 'job:artist_enrichment:lock';
 const REDIS_LOCK_TTL_SECONDS = 60 * 5; // was 10min — match the cron interval

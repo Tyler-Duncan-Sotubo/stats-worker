@@ -4,7 +4,7 @@ import Redis from 'ioredis';
 import { SongScraperService } from 'src/services/song-scraper.service';
 import { SongsRepository } from 'src/repository/songs.repository';
 
-const BATCH_SIZE = 50; // matches Spotify's batch limit — 1 API call per run
+const BATCH_SIZE = 200; // matches Spotify's batch limit — 1 API call per run
 const REDIS_CURSOR_KEY = 'job:song_enrichment:cursor';
 const REDIS_LOCK_KEY = 'job:song_enrichment:lock';
 const REDIS_LOCK_TTL_SECONDS = 60 * 5;
@@ -29,33 +29,27 @@ export class SongEnrichmentJob {
     try {
       this.logger.log('Song enrichment job starting');
 
-      const pending =
-        await this.songsRepository.findSongsNeedingEnrichment(10_000);
+      const cursorStr = await this.redis.get(REDIS_CURSOR_KEY);
+      const cursor = cursorStr ? parseInt(cursorStr, 10) : 0;
 
-      if (!pending.length) {
+      // Fetch only the batch we need — no loading 10K into memory
+      const batch = await this.songsRepository.findSongsNeedingEnrichmentPage(
+        BATCH_SIZE,
+        cursor,
+      );
+
+      if (!batch.length) {
         await this.redis.del(REDIS_CURSOR_KEY);
-        this.logger.log('No songs pending enrichment');
+        this.logger.log('No songs pending enrichment — cursor reset');
         return;
       }
 
-      const cursorStr = await this.redis.get(REDIS_CURSOR_KEY);
-      let cursor = cursorStr ? parseInt(cursorStr, 10) : 0;
-
-      if (cursor >= pending.length) {
-        cursor = 0;
-        this.logger.log(
-          `Cursor reset — all ${pending.length} pending songs processed, starting over`,
-        );
-      }
-
-      const batch = pending.slice(cursor, cursor + BATCH_SIZE);
       const nextCursor = cursor + batch.length;
 
       this.logger.log(
-        `Processing songs ${cursor + 1}–${nextCursor} of ${pending.length} pending`,
+        `Processing songs at offset ${cursor} — ${batch.length} in batch`,
       );
 
-      // Separate enrichable from skippable upfront
       const enrichable = batch.filter((s) => !!s.spotifyTrackId);
       const skipped = batch.filter((s) => !s.spotifyTrackId);
 
@@ -67,7 +61,6 @@ export class SongEnrichmentJob {
       let failed = 0;
 
       if (enrichable.length) {
-        // Group by artistId so enrichMany can batch album upserts per artist
         const byArtist = new Map<string, typeof enrichable>();
 
         for (const song of enrichable) {
@@ -99,7 +92,7 @@ export class SongEnrichmentJob {
 
       this.logger.log(
         `Batch complete — ${synced} synced, ${skipped.length} skipped, ${failed} failed. ` +
-          `Next run starts at song ${nextCursor + 1}`,
+          `Next run starts at offset ${nextCursor}`,
       );
     } finally {
       await this.releaseLock();

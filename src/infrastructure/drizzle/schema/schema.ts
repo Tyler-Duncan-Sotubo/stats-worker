@@ -224,6 +224,32 @@ export const albums = pgTable(
   ],
 );
 
+export const songAlbums = pgTable(
+  'song_albums',
+  {
+    id: uuid('id').primaryKey().$defaultFn(defaultId),
+
+    songId: uuid('song_id')
+      .notNull()
+      .references(() => songs.id, { onDelete: 'cascade' }),
+
+    albumId: uuid('album_id')
+      .notNull()
+      .references(() => albums.id, { onDelete: 'cascade' }),
+
+    trackNumber: integer('track_number'),
+    isPrimary: boolean('is_primary').notNull().default(false),
+
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('song_albums_song_album_idx').on(t.songId, t.albumId),
+    index('song_albums_album_idx').on(t.albumId),
+    index('song_albums_song_idx').on(t.songId),
+    index('song_albums_is_primary_idx').on(t.isPrimary),
+  ],
+);
+
 /* ============================================================================
    SONGS
 ============================================================================ */
@@ -622,9 +648,67 @@ export const records = pgTable(
   ],
 );
 
+export const milestoneEvents = pgTable(
+  'milestone_events',
+  {
+    id: uuid('id').primaryKey().$defaultFn(defaultId),
+
+    artistId: uuid('artist_id').references(() => artists.id, {
+      onDelete: 'cascade',
+    }),
+    songId: uuid('song_id').references(() => songs.id, {
+      onDelete: 'cascade',
+    }),
+
+    metric: text('metric').notNull(), // 'spotify_streams' | 'monthly_listeners'
+    threshold: bigint('threshold', { mode: 'number' }).notNull(),
+    crossedAt: date('crossed_at').notNull(),
+    streamValueAtCrossing: bigint('stream_value_at_crossing', {
+      mode: 'number',
+    }),
+
+    // notification tracking
+    notifiedAt: timestamp('notified_at'),
+    tweetId: text('tweet_id'),
+    tweetText: text('tweet_text'),
+    isAfrobeats: boolean('is_afrobeats').notNull().default(false),
+
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    // never fire twice for same artist/song/metric/threshold
+    uniqueIndex('milestone_events_unique_idx').on(
+      t.artistId,
+      t.songId,
+      t.metric,
+      t.threshold,
+    ),
+    index('milestone_events_artist_idx').on(t.artistId),
+    index('milestone_events_song_idx').on(t.songId),
+    index('milestone_events_crossed_at_idx').on(t.crossedAt),
+    index('milestone_events_notified_idx').on(t.notifiedAt),
+    index('milestone_events_is_afrobeats_idx').on(t.isAfrobeats),
+  ],
+);
+
 /* ============================================================================
    RELATIONS
 ============================================================================ */
+
+export const milestoneEventsRelations = relations(
+  milestoneEvents,
+  ({ one }) => ({
+    artist: one(artists, {
+      fields: [milestoneEvents.artistId],
+      references: [artists.id],
+    }),
+    song: one(songs, {
+      fields: [milestoneEvents.songId],
+      references: [songs.id],
+    }),
+  }),
+);
+
 export const artistsRelations = relations(artists, ({ one, many }) => ({
   mergedInto: one(artists, {
     fields: [artists.mergedIntoArtistId],
@@ -666,6 +750,18 @@ export const albumsRelations = relations(albums, ({ one, many }) => ({
   songs: many(songs),
   certifications: many(certifications),
   chartEntries: many(chartEntries),
+  songAlbums: many(songAlbums),
+}));
+
+export const songAlbumsRelations = relations(songAlbums, ({ one }) => ({
+  song: one(songs, {
+    fields: [songAlbums.songId],
+    references: [songs.id],
+  }),
+  album: one(albums, {
+    fields: [songAlbums.albumId],
+    references: [albums.id],
+  }),
 }));
 
 export const songsRelations = relations(songs, ({ one, many }) => ({
@@ -683,6 +779,7 @@ export const songsRelations = relations(songs, ({ one, many }) => ({
   chartEntries: many(chartEntries),
   records: many(records),
   audiomackSnapshots: many(songAudiomackSnapshots),
+  songAlbums: many(songAlbums),
 }));
 
 export const songAliasesRelations = relations(songAliases, ({ one }) => ({

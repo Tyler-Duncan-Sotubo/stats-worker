@@ -17,6 +17,7 @@ import {
   artistMonthlyListenerSnapshots,
   artistStatsSnapshots,
 } from '../infrastructure/drizzle/schema';
+import { notInArray } from 'drizzle-orm';
 
 @Injectable()
 export class ArtistsRepository {
@@ -400,6 +401,85 @@ export class ArtistsRepository {
       .where(and(...conditions))
       .orderBy(artists.id)
       .limit(limit);
+  }
+
+  async findTakenSlugs(
+    slugs: string[],
+    spotifyIds: string[],
+  ): Promise<Set<string>> {
+    if (!slugs.length) return new Set();
+
+    const result = await this.db
+      .select({ slug: artists.slug })
+      .from(artists)
+      .where(
+        and(
+          inArray(artists.slug, slugs),
+          notInArray(artists.spotifyId, spotifyIds.filter(Boolean)),
+        ),
+      );
+
+    return new Set(result.map((r) => r.slug));
+  }
+
+  async findSlugConflicts(
+    rows: { slug: string; spotifyId: string }[],
+  ): Promise<{ slug: string; existingSpotifyId: string | null }[]> {
+    if (!rows.length) return [];
+
+    const slugs = rows.map((r) => r.slug);
+    const spotifyIds = rows.map((r) => r.spotifyId).filter(Boolean);
+
+    const result = await this.db
+      .select({ slug: artists.slug, spotifyId: artists.spotifyId })
+      .from(artists)
+      .where(
+        and(
+          inArray(artists.slug, slugs),
+          notInArray(artists.spotifyId, spotifyIds),
+        ),
+      );
+
+    return result.map((r) => ({
+      slug: r.slug,
+      existingSpotifyId: r.spotifyId,
+    }));
+  }
+
+  // artists.repository.ts — add this method
+  async findAllBasicByListeners() {
+    const latestListeners = this.db
+      .select({
+        artistId: artistMonthlyListenerSnapshots.artistId,
+        monthlyListeners: artistMonthlyListenerSnapshots.monthlyListeners,
+        rn: sql<number>`ROW_NUMBER() OVER (
+        PARTITION BY ${artistMonthlyListenerSnapshots.artistId}
+        ORDER BY ${artistMonthlyListenerSnapshots.snapshotDate} DESC
+      )`.as('rn'),
+      })
+      .from(artistMonthlyListenerSnapshots)
+      .as('latest_listeners');
+
+    return this.db
+      .select({
+        id: artists.id,
+        name: artists.name,
+        normalizedName: artists.normalizedName,
+        slug: artists.slug,
+        spotifyId: artists.spotifyId,
+        originCountry: artists.originCountry,
+        monthlyListeners: sql<number>`COALESCE(${latestListeners.monthlyListeners}, 0)`,
+      })
+      .from(artists)
+      .leftJoin(
+        latestListeners,
+        and(
+          eq(latestListeners.artistId, artists.id),
+          eq(latestListeners.rn, 1),
+        ),
+      )
+      .where(isNotNull(artists.spotifyId))
+      .orderBy(sql`COALESCE(${latestListeners.monthlyListeners}, 0) DESC`);
   }
 
   private normaliseName(value: string): string {

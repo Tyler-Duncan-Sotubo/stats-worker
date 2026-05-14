@@ -19,7 +19,9 @@ export class CertificationsJob {
   ) {}
 
   async runBatch(): Promise<void> {
-    const allArtists = await this.artistsRepository.findAllBasic();
+    const allArtists = (
+      await this.artistsRepository.findAllBasicByListeners()
+    ).filter((a) => a.monthlyListeners >= 500000);
     if (!allArtists.length) return;
 
     const cursorStr = await this.redis.get(REDIS_CURSOR_KEY);

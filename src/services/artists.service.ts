@@ -202,7 +202,28 @@ export class ArtistsService {
       needsReview: false,
     }));
 
-    const upserted = await this.artistsRepository.upsertManyBySpotifyId(rows);
+    // Skip rows where slug is already taken by a different spotifyId
+    const takenSlugs = await this.artistsRepository.findTakenSlugs(
+      rows.map((r) => r.slug),
+      rows.map((r) => r.spotifyId),
+    );
+
+    const safeRows = rows.filter((r) => !takenSlugs.has(r.slug));
+    const skipped = rows.length - safeRows.length;
+
+    if (skipped > 0) {
+      this.logger.warn(
+        `Skipped ${skipped} artists with conflicting slugs: ${rows
+          .filter((r) => takenSlugs.has(r.slug))
+          .map((r) => `${r.name} (${r.slug})`)
+          .join(', ')}`,
+      );
+    }
+
+    if (!safeRows.length) return;
+
+    const upserted =
+      await this.artistsRepository.upsertManyBySpotifyId(safeRows);
     this.logger.log(`Upserted ${upserted.length} artists`);
   }
 

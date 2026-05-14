@@ -19,6 +19,8 @@ import { ArtistsRepository } from 'src/repository/artists.repository';
 import { SpotifyAuthService } from 'src/services/spotify-auth.service';
 import { SpotifyOfficialChartsService } from './chart/spotify-official-charts.service';
 import { AudiomackScraperService } from './audiomack/audiomack-scraper.service';
+import { SpotifyAlbumScraperService } from './album/spotify-album-scraper.service';
+import { SpotifyTrackBackfillService } from './album/spotify-track-backfill.service';
 
 @Module({
   imports: [
@@ -47,6 +49,8 @@ import { AudiomackScraperService } from './audiomack/audiomack-scraper.service';
     SpotifyAuthService,
     SpotifyOfficialChartsService,
     AudiomackScraperService,
+    SpotifyAlbumScraperService,
+    SpotifyTrackBackfillService,
   ],
   exports: [
     KworbArtistDiscoveryService,

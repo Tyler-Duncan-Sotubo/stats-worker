@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosResponse } from 'axios';
-import { SpotifyAuthService } from 'src/services/spotify-auth.service';
+import { SpotifyOfficialChartsService } from 'src/scraper/chart/spotify-official-charts.service';
 
 export interface SpotifyArtistMetadata {
   spotifyId: string;
@@ -15,17 +15,36 @@ export interface SpotifyArtistMetadata {
 @Injectable()
 export class SpotifyMetadataService {
   private readonly logger = new Logger(SpotifyMetadataService.name);
-  private accessToken: string | null = null;
-  private tokenExpiresAt = 0;
+  private tokenCache: { token: string; expiresAt: number } | null = null;
 
   constructor(
     private readonly config: ConfigService,
-    private readonly spotifyAuth: SpotifyAuthService,
+    private readonly spotifyOfficialChartsService: SpotifyOfficialChartsService,
   ) {}
 
   // ── Auth ──────────────────────────────────────────────────────────────
+  private async getFreshToken(): Promise<string> {
+    if (
+      this.tokenCache &&
+      Date.now() < this.tokenCache.expiresAt - 5 * 60 * 1000
+    ) {
+      return this.tokenCache.token;
+    }
+
+    this.logger.log('Fetching Spotify Bearer token via Playwright...');
+    const token = await this.spotifyOfficialChartsService.getBearerToken('ng');
+
+    this.tokenCache = {
+      token,
+      expiresAt: Date.now() + 50 * 60 * 1000,
+    };
+
+    this.logger.log('Bearer token acquired ✓');
+    return token;
+  }
+
   private async get<T>(path: string, retry = true): Promise<T> {
-    const token = await this.spotifyAuth.getAccessToken();
+    const token = await this.getFreshToken();
 
     try {
       const response: AxiosResponse<T> = await axios.get(
@@ -42,10 +61,7 @@ export class SpotifyMetadataService {
         axios.isAxiosError(err) &&
         (err.response?.status === 401 || err.response?.status === 403)
       ) {
-        this.logger.warn(
-          'Spotify token rejected — forcing refresh and retrying',
-        );
-        this.spotifyAuth.invalidate();
+        this.logger.warn('Token rejected — refreshing and retrying');
         return this.get<T>(path, false);
       }
       throw err;

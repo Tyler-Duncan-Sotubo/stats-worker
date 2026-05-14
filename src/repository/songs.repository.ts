@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, inArray, sql, and } from 'drizzle-orm';
+import { eq, inArray, sql, and, isNull, isNotNull, or } from 'drizzle-orm';
 import { DRIZZLE } from 'src/infrastructure/drizzle/drizzle.module';
 import type { DrizzleDB } from 'src/infrastructure/drizzle/drizzle.module';
 import { songs } from 'src/infrastructure/drizzle/schema';
@@ -66,6 +68,21 @@ export class SongsRepository {
       .limit(1);
 
     return row ?? null;
+  }
+
+  // In SongsRepository
+  async findEnrichedSongsWithoutAlbum(limit: number) {
+    return this.db
+      .select()
+      .from(songs)
+      .where(
+        and(
+          isNull(songs.albumId),
+          isNotNull(songs.spotifyTrackId),
+          eq(songs.sourceOfTruth, 'kworb'), // already enriched
+        ),
+      )
+      .limit(limit);
   }
 
   async findSongsNeedingEnrichment(limit = 100) {
@@ -183,5 +200,82 @@ export class SongsRepository {
       .returning();
 
     return row;
+  }
+
+  async findSongsNeedingEnrichmentPage(limit: number, offset: number) {
+    return this.db
+      .select({
+        id: songs.id,
+        title: songs.title,
+        artistId: songs.artistId,
+        spotifyTrackId: songs.spotifyTrackId,
+        entityStatus: songs.entityStatus,
+        isAfrobeats: songs.isAfrobeats,
+      })
+      .from(songs)
+      .where(
+        and(
+          isNotNull(songs.spotifyTrackId),
+          eq(songs.entityStatus, 'canonical'),
+          isNull(songs.mergedIntoSongId),
+          or(
+            isNull(songs.durationMs),
+            isNull(songs.releaseDate),
+            isNull(songs.imageUrl),
+          ),
+        ),
+      )
+      .orderBy(songs.artistId, songs.id)
+      .limit(limit)
+      .offset(offset);
+  }
+
+  async updateManyById(
+    updates: {
+      id: string;
+      albumId: string | null;
+      title: string;
+      normalizedTitle: string;
+      canonicalTitle: string;
+      spotifyTrackId: string;
+      releaseDate: string | null;
+      durationMs: number;
+      explicit: boolean;
+      imageUrl: string | null;
+      isAfrobeats: boolean;
+      sourceOfTruth: string;
+      entityStatus: string;
+      needsReview: boolean;
+    }[],
+  ) {
+    if (!updates.length) return [];
+
+    const results: any[] = [];
+
+    for (const update of updates) {
+      const saved = await this.db
+        .update(songs)
+        .set({
+          title: update.title,
+          normalizedTitle: update.normalizedTitle,
+          canonicalTitle: update.canonicalTitle,
+          spotifyTrackId: update.spotifyTrackId,
+          releaseDate: update.releaseDate,
+          durationMs: update.durationMs,
+          explicit: update.explicit,
+          imageUrl: update.imageUrl,
+          isAfrobeats: update.isAfrobeats,
+          sourceOfTruth: update.sourceOfTruth,
+          entityStatus: update.entityStatus as any,
+          needsReview: update.needsReview,
+          // updatedAt removed — not in schema
+        })
+        .where(eq(songs.id, update.id))
+        .returning();
+
+      results.push(...saved);
+    }
+
+    return results as any[];
   }
 }

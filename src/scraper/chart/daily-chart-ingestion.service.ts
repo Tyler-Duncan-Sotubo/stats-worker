@@ -82,11 +82,10 @@ export class DailyChartIngestionService {
 
       const rows = payload.rows.map((row) => ({
         rank: row.rank,
-        artist: row.artist, // "Kidd Carder, Mavo" — splitCompoundArtist handles this
+        artist: row.artist,
         title: row.title,
-        spotifyTrackId: row.spotifyUrl?.split('/track/')[1] ?? undefined,
+        spotifyTrackId: row.spotifyTrackId ?? undefined, // use directly
         imageUrl: row.imageUrl,
-        // no featuredArtists here — splitCompoundArtist extracts them from artist string
       }));
 
       await this.persistRows(

@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { Injectable, Logger } from '@nestjs/common';
 import { SongsRepository } from 'src/repository/songs.repository';
 import { AlbumScraperService } from './album-scraper.service';
@@ -60,8 +62,15 @@ export class SongScraperService {
 
     const uniqueIds = [...new Set(spotifyTrackIds)];
 
-    // Single batched Spotify call — up to 50 per request
+    // Batch Spotify call — handles chunking into 50s internally
     const metadataRows = await this.songMetadataService.fetchTracks(uniqueIds);
+
+    if (!metadataRows.length) {
+      this.logger.warn(
+        `[enrichMany] No metadata returned for ${uniqueIds.length} tracks`,
+      );
+      return [];
+    }
 
     const existingSongs =
       await this.songsRepository.findBySpotifyTrackIds(uniqueIds);
@@ -72,67 +81,21 @@ export class SongScraperService {
         .map((s) => [s.spotifyTrackId!, s]),
     );
 
-    // Deduplicate albums and upsert in one go
-    const albumInputs = Array.from(
-      new Map(
-        metadataRows
-          .filter((t) => t.spotifyAlbumId)
-          .map((t) => [
-            t.spotifyAlbumId,
-            {
-              artistId,
-              spotifyAlbumId: t.spotifyAlbumId,
-              title: t.albumName,
-              albumType: t.albumType,
-              releaseDate: t.releaseDate || null,
-              imageUrl: t.albumImageUrl,
-              totalTracks: t.totalTracks,
-            },
-          ]),
-      ).values(),
-    );
-
-    const upsertedAlbums =
-      await this.albumScraperService.upsertMany(albumInputs);
-    const albumMap = new Map(upsertedAlbums.map((a) => [a.spotifyAlbumId, a]));
-
-    const results: Awaited<ReturnType<typeof this.enrichOne>>[] = [];
-    let failed = 0;
-
-    for (const track of metadataRows) {
-      try {
-        const album = track.spotifyAlbumId
-          ? albumMap.get(track.spotifyAlbumId)
-          : null;
-
-        const resolved = await this.entityResolutionService.resolveSong({
-          artistId,
-          title: track.title,
-          spotifyTrackId: track.spotifyTrackId,
-          source: 'spotify',
-          allowCreate: true,
-          markProvisionalIfCreated: false,
-          externalIds: [
-            {
-              source: 'spotify',
-              externalId: track.spotifyTrackId,
-            },
-          ],
-        });
-
-        if (!resolved) {
+    // Build updates directly from existingMap — no resolveSong needed
+    const updates = metadataRows
+      .map((track) => {
+        const existing = existingMap.get(track.spotifyTrackId);
+        if (!existing) {
           this.logger.warn(
-            `[enrichMany] Failed to resolve "${track.title}" (${track.spotifyTrackId})`,
+            `[enrichMany] No existing song for "${track.title}" (${track.spotifyTrackId}) — skipping`,
           );
-          failed += 1;
-          continue;
+          return null;
         }
 
-        const existing = existingMap.get(track.spotifyTrackId);
-
-        const saved = await this.songsRepository.updateById(resolved.id, {
+        return {
+          id: existing.id,
           artistId,
-          albumId: album?.id ?? null,
+          albumId: existing.albumId ?? null, // preserve — set by album ingestion pipeline
           title: track.title,
           normalizedTitle: this.normalizeTitle(track.title),
           canonicalTitle: track.title,
@@ -141,26 +104,26 @@ export class SongScraperService {
           durationMs: track.durationMs,
           explicit: track.explicit,
           imageUrl: track.albumImageUrl,
-          isAfrobeats: existing?.isAfrobeats ?? false,
-          sourceOfTruth: 'spotify',
-          entityStatus: existing?.entityStatus ?? 'canonical',
+          isAfrobeats: existing.isAfrobeats ?? false,
+          sourceOfTruth: 'spotify' as const,
+          entityStatus: (existing.entityStatus ?? 'canonical') as any,
           needsReview: false,
-        });
+        };
+      })
+      .filter((u): u is NonNullable<typeof u> => u !== null);
 
-        results.push(saved);
-      } catch (err) {
-        failed += 1;
-        this.logger.error(
-          `[enrichMany] Failed to save "${track.title}": ${(err as Error).message}`,
-        );
-      }
+    if (!updates.length) {
+      this.logger.warn(`[enrichMany] No updates to apply`);
+      return [];
     }
 
+    const results = await this.songsRepository.updateManyById(updates);
+
     this.logger.log(
-      `[enrichMany] ${results.length} enriched, ${failed} failed`,
+      `[enrichMany] ${results.length} enriched, ${metadataRows.length - results.length} skipped/failed`,
     );
 
-    return results;
+    return results as any[];
   }
 
   // ── Called by enrichPending ───────────────────────────────────────────
