@@ -15,16 +15,14 @@ export type DrizzleDB = ReturnType<typeof drizzle<typeof schema>>;
     {
       provide: DRIZZLE,
       inject: [ConfigService],
-      useFactory: async (config: ConfigService) => {
+      useFactory: (config: ConfigService) => {
         const pool = new Pool({
           connectionString: config.getOrThrow('DATABASE_URL'),
-          max: 10, // max pool size
-          idleTimeoutMillis: 30000,
-          connectionTimeoutMillis: 2000,
+          max: 5,
+          idleTimeoutMillis: 5000, // release idle connections after 5s
+          connectionTimeoutMillis: 5000, // increase timeout for cold boots
+          allowExitOnIdle: true, // allow process to exit when pool idle
         });
-
-        // eager connect — don't wait for first query
-        await pool.connect();
 
         return drizzle(pool, { schema });
       },
