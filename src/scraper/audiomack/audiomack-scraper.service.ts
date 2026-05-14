@@ -68,7 +68,6 @@ export class AudiomackScraperService {
   // ── Fetch single artist ────────────────────────────────────────────────────
 
   async scrapeArtist(audiomackSlug: string): Promise<AudiomackArtistStats> {
-    console.log(`[Audiomack] Starting scrape for ${audiomackSlug}`);
     const url = `https://audiomack.com/${audiomackSlug}`;
     this.logger.log(`[Audiomack] Scraping ${url}`);
 

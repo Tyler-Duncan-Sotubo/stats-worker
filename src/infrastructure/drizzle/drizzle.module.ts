@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Module, Global } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -19,9 +17,18 @@ export type DrizzleDB = ReturnType<typeof drizzle<typeof schema>>;
         const pool = new Pool({
           connectionString: config.getOrThrow('DATABASE_URL'),
           max: 5,
-          idleTimeoutMillis: 5000, // release idle connections after 5s
-          connectionTimeoutMillis: 5000, // increase timeout for cold boots
-          allowExitOnIdle: true, // allow process to exit when pool idle
+          idleTimeoutMillis: 5000,
+          connectionTimeoutMillis: 10000, // more time for cold boot wake
+          allowExitOnIdle: true,
+        });
+
+        // Handle stale connection errors gracefully
+        // instead of crashing the process
+        pool.on('error', (err) => {
+          console.error(
+            'Pool client error — removing stale connection:',
+            err.message,
+          );
         });
 
         return drizzle(pool, { schema });
