@@ -10,7 +10,7 @@ export class WarmupService {
 
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleDB) {}
 
-  @Cron('*/1 * * * *', { timeZone: 'Europe/London' })
+  @Cron('*/5 * * * *', { timeZone: 'Europe/London' })
   async ping() {
     try {
       await this.db.execute(sql`SELECT 1`);
