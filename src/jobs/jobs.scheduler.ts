@@ -28,12 +28,14 @@ export class JobsScheduler {
   // Early enough to complete before snapshots start at 4:00 AM
   // ───────────────────────────────────────────────────────────────────────────
 
+  // Monday 2AM — discover new artists and seed catalog
   @Cron('0 2 * * 1', { timeZone: 'Europe/London' })
   async runArtistDiscovery(): Promise<void> {
     await this.discoveryJob.runDiscoveryAndSeed();
   }
 
-  @Cron('0 3 * * 1', { timeZone: 'Europe/London' })
+  // Tuesday–Sunday 11AM — sync listener snapshots for existing artists
+  @Cron('0 11 * * 2,3,4,5,6,0', { timeZone: 'Europe/London' })
   async runListenerSnapshotSync(): Promise<void> {
     await this.discoveryJob.runListenerSnapshotSync();
   }
