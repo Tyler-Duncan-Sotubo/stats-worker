@@ -8,6 +8,7 @@ import { AppRedisModule } from './infrastructure/redis/redis.module';
 import { CacheModule } from './infrastructure/cache/cache.module';
 import { BullModule } from '@nestjs/bullmq';
 import { JobsModule } from './jobs/jobs.module';
+import { HealthModule } from './infrastructure/health/health.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { JobsModule } from './jobs/jobs.module';
       },
     }),
     JobsModule,
+    HealthModule,
   ],
 })
 export class AppModule {}
