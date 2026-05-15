@@ -65,5 +65,6 @@ export class CacheService {
     MEDIUM: 60 * 60 * 6, //  6 hours    — rankings, top lists
     LONG: 60 * 60 * 24, // 24 hours    — artist profiles, song pages
     EXTENDED: 60 * 60 * 24 * 7, // 7 days   — certifications, awards (rarely change)
+    DAY: 90000,
   } as const;
 }
