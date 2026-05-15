@@ -17,10 +17,9 @@ export type DrizzleDB = ReturnType<typeof drizzle<typeof schema>>;
         const pool = new Pool({
           connectionString: config.getOrThrow('DATABASE_URL'),
           max: 5,
-          idleTimeoutMillis: 5000,
+          idleTimeoutMillis: 5000, // release connections after 5s idle
           connectionTimeoutMillis: 15000,
-          keepAlive: true,
-          keepAliveInitialDelayMillis: 10000,
+          allowExitOnIdle: true, // allow pool to fully drain
         });
 
         // Handle stale connection errors gracefully
