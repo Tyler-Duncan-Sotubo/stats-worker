@@ -69,6 +69,8 @@ function shouldRun(monthlyListeners: number, filter: TierFilter): boolean {
   return tierOf(monthlyListeners) === filter;
 }
 
+const MIN_STREAMS_TO_SNAPSHOT = 1_000_000;
+
 @Injectable()
 export class SnapshotService {
   private readonly logger = new Logger(SnapshotService.name);
@@ -239,13 +241,16 @@ export class SnapshotService {
       }
     }
 
+    const significantSnapshots = songSnapshots.filter(
+      (s) => (s.spotifyStreams ?? 0) >= MIN_STREAMS_TO_SNAPSHOT,
+    );
     await Promise.all([
-      this.snapshotRepository.bulkUpsertSongSnapshots(songSnapshots),
+      this.snapshotRepository.bulkUpsertSongSnapshots(significantSnapshots),
       this.snapshotRepository.bulkEnsureFeatureLinks(featureLinks),
     ]);
 
     await this.redis.set(key, '1', 'EX', TTL_SECONDS);
-    return songSnapshots.length;
+    return significantSnapshots.length;
   }
 
   private normalizeKworbDate(value?: string | null): string | null {

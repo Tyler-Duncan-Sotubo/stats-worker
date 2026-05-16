@@ -35,7 +35,7 @@ export class JobsScheduler {
   }
 
   // Tuesday–Sunday 11AM — sync listener snapshots for existing artists
-  @Cron('0 11 * * 2,3,4,5,6,0', { timeZone: 'Europe/London' })
+  @Cron('0 17 * * 2,3,4,5,6,0', { timeZone: 'Europe/London' })
   async runListenerSnapshotSync(): Promise<void> {
     await this.discoveryJob.runListenerSnapshotSync();
   }
