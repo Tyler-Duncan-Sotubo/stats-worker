@@ -17,6 +17,7 @@ import { CleanupJob } from './cleanup/cleanup.job';
 import { AlbumBackfillJob } from './catalog/album-backfilljob';
 import { MilestoneDetectorService } from './milestone/milestone-detector.service';
 import { MilestoneDetectionJob } from './milestone/milestone-detector.job';
+import { CacheWarmJob } from 'src/infrastructure/cache/cache-warm.job';
 
 @Module({
   imports: [RepositoryModule, ServicesModule, ScraperModule],
@@ -36,6 +37,7 @@ import { MilestoneDetectionJob } from './milestone/milestone-detector.job';
     AlbumBackfillJob,
     MilestoneDetectorService,
     MilestoneDetectionJob,
+    CacheWarmJob,
   ],
   exports: [
     DiscoveryJob,

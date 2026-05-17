@@ -8,6 +8,7 @@ import { UnifiedSnapshotJob } from './snapshots/unified-snapshot.job';
 import { OfficialChartsIngestionJob } from './charts/official-charts-injecton.job';
 import { BillboardIngestionJob } from './charts/billboard-injection.job';
 import { MilestoneDetectionJob } from './milestone/milestone-detector.job';
+import { CacheWarmJob } from 'src/infrastructure/cache/cache-warm.job';
 
 @Injectable()
 export class JobsScheduler {
@@ -20,6 +21,7 @@ export class JobsScheduler {
     private readonly officialChartsIngestionJob: OfficialChartsIngestionJob,
     private readonly billboardIngestionJob: BillboardIngestionJob,
     private readonly milestoneDetectionJob: MilestoneDetectionJob,
+    private readonly cacheWarmJob: CacheWarmJob,
   ) {}
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -158,5 +160,17 @@ export class JobsScheduler {
   @Cron('0 21 * * *', { timeZone: 'Europe/London' })
   async runMilestoneDetection(): Promise<void> {
     await this.milestoneDetectionJob.runDetection();
+  }
+
+  // after runMilestoneDetection
+  // ───────────────────────────────────────────────────────────────────────────
+  // CACHE WARM
+  // Once daily at 10:00 PM — after milestone detection completes
+  // MVs and milestones must be fresh before warming sitemap cache
+  // ───────────────────────────────────────────────────────────────────────────
+
+  @Cron('0 22 * * *', { timeZone: 'Europe/London' })
+  async runCacheWarm(): Promise<void> {
+    await this.cacheWarmJob.run();
   }
 }

@@ -642,3 +642,28 @@ CREATE INDEX idx_sss_artist
   ON song_search_summary (artist_id);
 CREATE INDEX idx_sss_afrobeats
   ON song_search_summary (is_afrobeats, total_streams DESC NULLS LAST);
+
+
+  -- =============================================================
+-- 17. SITEMAP SONGS
+-- =============================================================
+CREATE MATERIALIZED VIEW sitemap_songs AS
+SELECT
+  s.slug,
+  s.created_at                              AS "updatedAt",
+  ss.total_spotify_streams                  AS "totalStreams",
+  ROW_NUMBER() OVER (
+    ORDER BY ss.total_spotify_streams DESC, s.slug DESC
+  )                                         AS rn
+FROM song_stream_summary ss
+JOIN songs s ON s.id = ss.song_id
+WHERE ss.total_spotify_streams >= 1000000
+  AND s.entity_status = 'canonical'
+  AND s.slug IS NOT NULL
+  AND s.merged_into_song_id IS NULL
+ORDER BY ss.total_spotify_streams DESC, s.slug DESC;
+
+CREATE UNIQUE INDEX idx_sitemap_songs_rn
+  ON sitemap_songs (rn);
+CREATE INDEX idx_sitemap_songs_streams
+  ON sitemap_songs (total_spotify_streams DESC);

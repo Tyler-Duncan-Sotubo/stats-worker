@@ -23,6 +23,14 @@ export class CacheService {
     await this.redis.del(key);
   }
 
+  async getRaw(key: string): Promise<string | null> {
+    return this.redis.get(key); // no JSON.parse
+  }
+
+  async setRaw(key: string, value: string, ttlSeconds: number): Promise<void> {
+    await this.redis.set(key, value, 'EX', ttlSeconds);
+  }
+
   // ── Cache-aside — the main pattern used everywhere ────────────────────
 
   async cached<T>(
@@ -65,6 +73,6 @@ export class CacheService {
     MEDIUM: 60 * 60 * 6, //  6 hours    — rankings, top lists
     LONG: 60 * 60 * 24, // 24 hours    — artist profiles, song pages
     EXTENDED: 60 * 60 * 24 * 7, // 7 days   — certifications, awards (rarely change)
-    DAY: 90000,
+    DAY: 60 * 60 * 24,
   } as const;
 }

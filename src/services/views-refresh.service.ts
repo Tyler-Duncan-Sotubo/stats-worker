@@ -17,6 +17,7 @@ const GROUP_1_VIEWS = [
   'artist_recent_chart_summary',
   'artist_growth_summary',
   'song_growth_summary',
+  'sitemap_songs',
 ] as const;
 
 // Views that depend on group 1 — run after group 1 completes
