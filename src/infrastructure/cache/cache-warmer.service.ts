@@ -27,7 +27,6 @@ export class CacheWarmerService {
       this.warmSitemapSongPages(),
       this.warmSitemapArtistPages(),
       this.warmSitemapAlbumPages(),
-      this.warmSitemapMilestonePages(),
     ]);
 
     this.logger.log(`Cache warming complete in ${Date.now() - start}ms`);
@@ -57,7 +56,7 @@ export class CacheWarmerService {
     for (let page = 1; page <= totalPages; page++) {
       try {
         const result = await this.db.execute(sql`
-        SELECT slug, "updatedAt", "totalStreams"
+        SELECT rn, slug, "updatedAt", "totalStreams"
         FROM sitemap_songs
         WHERE rn > ${lastRn}
         ORDER BY rn
@@ -67,11 +66,12 @@ export class CacheWarmerService {
         if (!result.rows.length) break;
 
         const rows = result.rows as {
+          rn: number;
           slug: string;
           updatedAt: string;
           totalStreams: number;
         }[];
-        lastRn = (rows[rows.length - 1] as any).rn ?? lastRn + rows.length;
+        lastRn = Number(rows[rows.length - 1].rn);
 
         const xml = this.buildSongSitemapXml(rows);
         await this.cache.setRaw(
@@ -381,13 +381,13 @@ ${urls}
   // ---------- sitemap index ----------
 
   private async warmSitemapIndex(): Promise<void> {
-    const [songCount, artistCount, albumCount, milestoneCount] =
+    const [songCount, artistCount, albumCount] =
       await Promise.all([
         this.db.execute(sql`
           SELECT COUNT(*)::int AS total
           FROM song_stream_summary ss
           JOIN songs s ON s.id = ss.song_id
-          WHERE ss.total_spotify_streams >= 1000000
+          WHERE ss.total_spotify_streams >= 10000000
             AND s.entity_status = 'canonical'
             AND s.slug IS NOT NULL
             AND s.merged_into_song_id IS NULL
@@ -402,12 +402,6 @@ ${urls}
           SELECT COUNT(*)::int AS total
           FROM albums
           WHERE slug IS NOT NULL
-        `),
-        this.db.execute(sql`
-          SELECT COUNT(*)::int AS total
-          FROM milestone_events me
-          JOIN artists a ON a.id = me.artist_id
-          WHERE a.slug IS NOT NULL
         `),
       ]);
 
@@ -427,15 +421,10 @@ ${urls}
         (albumCount.rows[0] as any).total,
         CacheService.TTL.DAY,
       ),
-      this.cache.set(
-        'public:milestones:facts:indexable:count',
-        (milestoneCount.rows[0] as any).total,
-        CacheService.TTL.DAY,
-      ),
     ]);
 
     this.logger.log(
-      `Sitemap index warmed — songs: ${(songCount.rows[0] as any).total}, artists: ${(artistCount.rows[0] as any).total}, albums: ${(albumCount.rows[0] as any).total}, milestones: ${(milestoneCount.rows[0] as any).total}`,
+      `Sitemap index warmed — songs: ${(songCount.rows[0] as any).total}, artists: ${(artistCount.rows[0] as any).total}, albums: ${(albumCount.rows[0] as any).total}`,
     );
   }
 }

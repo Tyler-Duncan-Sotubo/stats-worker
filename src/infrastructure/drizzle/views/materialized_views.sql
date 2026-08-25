@@ -657,7 +657,7 @@ SELECT
   )                                         AS rn
 FROM song_stream_summary ss
 JOIN songs s ON s.id = ss.song_id
-WHERE ss.total_spotify_streams >= 1000000
+WHERE ss.total_spotify_streams >= 10000000
   AND s.entity_status = 'canonical'
   AND s.slug IS NOT NULL
   AND s.merged_into_song_id IS NULL
@@ -666,4 +666,4 @@ ORDER BY ss.total_spotify_streams DESC, s.slug DESC;
 CREATE UNIQUE INDEX idx_sitemap_songs_rn
   ON sitemap_songs (rn);
 CREATE INDEX idx_sitemap_songs_streams
-  ON sitemap_songs (total_spotify_streams DESC);
+  ON sitemap_songs ("totalStreams" DESC);
